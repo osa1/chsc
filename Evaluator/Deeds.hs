@@ -3,6 +3,7 @@ module Evaluator.Deeds where
 
 import StaticFlags
 import Utilities
+import Data.List
 
 import Data.Ord (comparing)
 

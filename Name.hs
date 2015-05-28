@@ -6,16 +6,13 @@ module Name (
 import Utilities
 
 import Data.Char
+import Data.List
 import Data.Ord
-
 
 data Name = Name {
     name_string :: String,
-    name_id :: !(Maybe Id)
+    name_id     :: !(Maybe Id)
   }
-
-instance NFData Name where
-    rnf (Name a b) = rnf a `seq` rnf b
 
 instance Show Name where
     show n = "(name " ++ show (show (pPrint n)) ++ ")"

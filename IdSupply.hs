@@ -33,6 +33,7 @@ newtype Id = Id { hashedId :: Int }
 data IdSupply = IdSupply Int# IdSupply IdSupply
 
 instance NFData IdSupply where
+    rnf _ = ()
     -- NB: better not rnf the infinite tree of supplies...
 
 -- | Generates a new supply of unique identifiers. The given character
@@ -63,15 +64,30 @@ splitIdSupplyL ids = ids1 : splitIdSupplyL ids2
 idFromSupply :: IdSupply -> Id
 idFromSupply (IdSupply n _ _) = Id (I# n)
 
-instance Eq Id where Id (I# x) == Id (I# y) = x ==# y
+instance Eq Id where
+  Id (I# x) == Id (I# y) =
+    case x ==# y of
+      0# -> False
+      _  -> True
 
 instance Ord Id
  where
-  Id (I# x) <  Id (I# y) = x <#  y
-  Id (I# x) <= Id (I# y) = x <=# y
+  Id (I# x) <  Id (I# y) =
+    case x <# y of
+      0# -> False
+      _  -> True
+
+  Id (I# x) <= Id (I# y) =
+    case x <=# y of
+      0# -> False
+      _  -> True
 
   compare (Id (I# x)) (Id (I# y)) =
-   if x ==# y then EQ else if x <# y then LT else GT
+    case x ==# y of
+      0# -> case x <# y of
+              0# -> GT
+              _  -> LT
+      _  -> EQ
 
 instance Show Id
  where

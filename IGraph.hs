@@ -7,10 +7,12 @@ import Control.Exception (bracket)
 
 import Data.Array
 import Data.IORef
+import Data.List (genericLength)
 import qualified Data.Map as M
 
 import Foreign.C
 import Foreign.Marshal
+import Foreign.Marshal.Unsafe
 import Foreign.Ptr
 
 import qualified Data.Graph.Wrapper as G

@@ -1,45 +1,46 @@
-{-# LANGUAGE TupleSections, PatternGuards, ExistentialQuantification, DeriveFunctor, DeriveFoldable, DeriveTraversable, GeneralizedNewtypeDeriving,
-             TypeSynonymInstances, FlexibleInstances, IncoherentInstances, OverlappingInstances, TypeOperators, CPP #-}
+{-# LANGUAGE CPP, DeriveFoldable, DeriveFunctor, DeriveTraversable,
+             ExistentialQuantification, FlexibleInstances,
+             GeneralizedNewtypeDeriving, IncoherentInstances, PatternGuards,
+             TupleSections, TypeOperators, TypeSynonymInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Utilities (
     module IdSupply,
     module Utilities,
-    
+
     module Control.Arrow,
     module Control.DeepSeq,
     module Control.Monad,
-    
+
     module Data.Maybe,
-    module Data.List,
-    
+
     module Debug.Trace,
-    
+
     module Text.PrettyPrint.HughesPJClass
   ) where
 
 import IdSupply
 import StaticFlags
 
-import Control.Arrow (first, second, (***), (&&&))
-import Control.DeepSeq (NFData(..), rnf)
+import Control.Arrow (first, second, (&&&), (***))
+import Control.DeepSeq (NFData (..), rnf)
 import Control.Monad hiding (join)
 
+import qualified Data.Foldable as Foldable
 import qualified Data.Graph.Wrapper as G
-import Data.Maybe
-import Data.Monoid
-import Data.List
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
+import Data.List
 import qualified Data.Map as M
+import Data.Maybe
+import Data.Monoid hiding ((<>))
 import qualified Data.Set as S
-import Data.Tree
 import Data.Time.Clock.POSIX (getPOSIXTime)
-import qualified Data.Foldable as Foldable
 import qualified Data.Traversable as Traversable
+import Data.Tree
 
 import Debug.Trace
 
-import Text.PrettyPrint.HughesPJClass hiding (render, int, float, char)
+import Text.PrettyPrint.HughesPJClass hiding (char, first, float, int, render)
 import qualified Text.PrettyPrint.HughesPJClass as Pretty
 
 import System.IO
@@ -79,7 +80,7 @@ class Functor z => Zippable z where
 
 instance Monad (Either a) where
     return = Right
-    
+
     Left l  >>= _    = Left l
     Right x >>= fxmy = fxmy x
 
@@ -123,12 +124,8 @@ class NFData1 f where
 instance (NFData1 f, NFData a) => NFData (f a) where
     rnf = rnf1
 
-
 class Pretty1 f where
     pPrintPrec1 :: Pretty a => PrettyLevel -> Rational -> f a -> Doc
-
-instance (Pretty1 f, Pretty a) => Pretty (f a) where
-    pPrintPrec = pPrintPrec1
 
 
 instance NFData Id where
@@ -139,6 +136,7 @@ instance NFData a => NFData1 ((,) a) where
 
 
 newtype (f :.: g) a = Comp { unComp :: f (g a) }
+    deriving (Functor, Foldable)
 
 infixr 9 :.:
 
@@ -159,12 +157,6 @@ instance (NFData1 f, NFData1 g) => NFData1 (f :.: g) where
 
 instance (Pretty1 f, Pretty1 g) => Pretty1 (f :.: g) where
     pPrintPrec1 level prec (Comp x) = pPrintPrec level prec x
-
-instance (Functor f, Functor g) => Functor (f :.: g) where
-    fmap f (Comp x) = Comp (fmap (fmap f) x)
-
-instance (Foldable.Foldable f, Foldable.Foldable g) => Foldable.Foldable (f :.: g) where
-    foldMap f = Foldable.foldMap (Foldable.foldMap f) . unComp
 
 instance (Traversable.Traversable f, Traversable.Traversable g) => Traversable.Traversable (f :.: g) where
     traverse f = fmap Comp . Traversable.traverse (Traversable.traverse f) . unComp
@@ -453,7 +445,7 @@ seperate c = go []
 accumL :: (acc -> (acc, a)) -> acc -> Int -> (acc, [a])
 accumL f = go
   where
-    go acc n | n <= 0            = (acc, []) 
+    go acc n | n <= 0            = (acc, [])
              | (acc, x) <- f acc = second (x:) (go acc (n - 1))
 
 
@@ -681,6 +673,10 @@ instance Pretty1 Identity where
 instance Copointed Identity where
     extract = unI
 
+instance Applicative Identity where
+    pure = I
+    I a <*> I b = I $ a b
+
 instance Monad Identity where
     return = I
     mx >>= fxmy = fxmy (unI mx)
@@ -693,7 +689,7 @@ sumMap f = Foldable.foldr (\x n -> f x + n) 0
 class (Functor t, Foldable.Foldable t) => Accumulatable t where
     mapAccumT  ::            (acc -> x ->   (acc, y)) -> acc -> t x ->   (acc, t y)
     mapAccumTM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> t x -> m (acc, t y)
-    
+
     mapAccumT f acc x = unI (mapAccumTM (\acc' x' -> I (f acc' x')) acc x)
 
 fmapDefault :: (Accumulatable t) => (a -> b) -> t a -> t b

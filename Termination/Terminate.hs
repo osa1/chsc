@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, Rank2Types, TupleSections, GADTs, DeriveFunctor, DeriveFoldable, ScopedTypeVariables, TypeSynonymInstances, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, RankNTypes #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, Rank2Types, TupleSections, GADTs, DeriveFunctor, DeriveFoldable, ScopedTypeVariables, TypeSynonymInstances, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, RankNTypes, DeriveTraversable #-}
 module Termination.Terminate where
 
 import Utilities
@@ -234,7 +234,7 @@ instance Ord k => HasDomain (M.Map k) where
     unsafeZipWith_ = M.intersectionWith
 
 newtype CertifyDomainEq dom f a = UnsafeCertifyDomainEq { unUCDE :: f a }
-                                deriving (Functor, Foldable.Foldable, Traversable.Traversable)
+  deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance (Functor f, HasDomain f) => Zippable (CertifyDomainEq dom f) where
     -- The domain equality witnessed by dom proves that we are not throwing away any information

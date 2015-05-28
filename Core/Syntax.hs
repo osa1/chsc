@@ -1,17 +1,21 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, TypeSynonymInstances, FlexibleInstances, Rank2Types #-}
+{-# LANGUAGE DeriveAnyClass, DeriveGeneric, FlexibleInstances, PatternGuards,
+             Rank2Types, TypeSynonymInstances, ViewPatterns #-}
 module Core.Syntax where
 
 import Core.Data (DataCon)
 
 import Name
-import Utilities
 import StaticFlags
+import Utilities
 
+import Control.DeepSeq ()
+import Data.List
+import GHC.Generics (Generic)
 
 type Var = Name
 
 data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | LessThanEqual
-            deriving (Eq, Ord, Show)
+            deriving (Eq, Ord, Show, Generic, NFData)
 
 data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var)
             deriving (Eq, Show)
@@ -69,8 +73,6 @@ type Value = ValueF Identity
 type TaggedValue = ValueF Tagged
 data ValueF ann = Indirect Var | Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal -- TODO: add PAPs as well? Would avoid duplicating function bodies too eagerly.
                 deriving (Eq, Show)
-
-instance NFData PrimOp
 
 instance NFData AltCon where
     rnf (DataAlt a b) = rnf a `seq` rnf b
