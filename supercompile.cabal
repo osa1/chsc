@@ -2,8 +2,8 @@ cabal-version:      >= 1.10
 build-type:         Simple
 name:               supercompile
 version:            0.1
-maintainer:         Max Bolingbroke <batterseapower@hotmail.com>
-homepage:           http://www.github.com/batterseapower/supercompile
+maintainer:         Ömer Sinan Ağacan <oagacan@indiana.edu>
+homepage:           https://github.com/osa1/chsc
 license:            BSD3
 license-file:       LICENSE
 author:             Max Bolingbroke
