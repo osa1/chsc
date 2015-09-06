@@ -1,18 +1,12 @@
-# Input/output pairs
-input/
-output/
-thrifty-output/
-
-# OS junk
-.DS_Store
-Thumbs.db
-
-# Cabal and Haskell stuff
-dist/
-dist-ticky/
-dist-profiling/
-*.hi
+dist
+cabal-dev
 *.o
-
-# Python stuff
-*.pyc
+*.hi
+*.chi
+*.chs.h
+.virtualenv
+.hsenv
+.cabal-sandbox/
+cabal.sandbox.config
+cabal.config
+tags
