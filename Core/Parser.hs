@@ -1,10 +1,10 @@
-{-# LANGUAGE PatternGuards, TupleSections, ViewPatterns #-}
+{-# LANGUAGE PatternGuards, TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 module Core.Parser (parse) where
 
 import Core.Data
-import Core.Syntax
 import Core.Prelude
+import Core.Syntax
 
 import Name hiding (freshName)
 import qualified Name
@@ -16,6 +16,7 @@ import qualified Data.Map as M
 import qualified Language.Haskell.Exts as LHE
 import Language.Preprocessor.Cpphs
 
+import Control.Monad.Identity
 import System.Directory
 import System.FilePath (replaceExtension)
 
@@ -25,15 +26,23 @@ parse path = do
     -- Read and pre-process .core file
     contents <- readFile path >>= cpp
     unless qUIET $ putStrLn contents
-    
+
     -- Read and pre-process corresponding .hs file (if any)
     let wrapper_path = replaceExtension path ".hs"
     has_wrapper <- doesFileExist wrapper_path
     wrapper <- if has_wrapper then readFile wrapper_path >>= cpp else return ""
-    
+
+    let parseMode =
+          LHE.defaultParseMode { LHE.parseFilename = path
+                               , LHE.extensions = map LHE.EnableExtension [LHE.CPP, LHE.MagicHash] }
+
+        parseRet = LHE.parseFileContentsWithMode parseMode contents
+
     -- Return parsed .core file
-    return (wrapper, moduleCore . LHE.fromParseResult . LHE.parseFileContentsWithMode (LHE.defaultParseMode { LHE.parseFilename = path, LHE.extensions = [LHE.CPP, LHE.MagicHash] }) $ contents)
-  where cpp = runCpphs (defaultCpphsOptions { boolopts = (boolopts defaultCpphsOptions) { locations = False }, defines = ("SUPERCOMPILE", "1") : defines defaultCpphsOptions }) path
+    return (wrapper, moduleCore (LHE.fromParseResult parseRet))
+
+  where
+    cpp = runCpphs (defaultCpphsOptions { boolopts = (boolopts defaultCpphsOptions) { locations = False }, defines = ("SUPERCOMPILE", "1") : defines defaultCpphsOptions }) path
 
 
 -- | Descriptions of terms: used for building readable names for ANF-introduced variables
@@ -46,7 +55,7 @@ descriptionString = go (0 :: Int)
     go n (ArgumentOf d) = go (n + 1) d
 
 desc :: Term -> Description
-desc = desc' . unI
+desc = desc' . runIdentity
 
 desc' :: TermF Identity -> Description
 desc' (Var x)         = Opaque (name_string x)
@@ -61,9 +70,9 @@ argOf = ArgumentOf
 
 
 data ParseState = ParseState {
-    ids :: IdSupply,
-    dcWrappers :: M.Map DataCon Var,
-    intWrappers :: M.Map Integer Var,
+    ids          :: IdSupply,
+    dcWrappers   :: M.Map DataCon Var,
+    intWrappers  :: M.Map Integer Var,
     charWrappers :: M.Map Char Var,
     primWrappers :: M.Map PrimOp Var
   }
@@ -96,15 +105,26 @@ newtype ParseM a = ParseM { unParseM :: ParseState -> (ParseState, [(Var, Term)]
 instance Functor ParseM where
     fmap = liftM
 
+instance Applicative ParseM where
+    pure x = ParseM $ \s -> (s, [], x)
+
+    f <*> a = ParseM $ \s -> do
+      let (s', floats1, f') = unParseM f s
+          (s'', floats2, a') = unParseM a s'
+       in (s'', floats1 ++ floats2, f' a')
+
 instance Monad ParseM where
-    return x = ParseM $ \s -> (s, [], x)
-    mx >>= fxmy = ParseM $ \s -> case unParseM mx s of (s, floats1, x) -> case unParseM (fxmy x) s of (s, floats2, y) -> (s, floats1 ++ floats2, y)
+    mx >>= fxmy =
+      ParseM $ \s ->
+        let (s', floats1, x) = unParseM mx s
+            (s'', floats2, y) = unParseM (fxmy x) s'
+         in (s'', floats1 ++ floats2, y)
 
 freshName :: String -> ParseM Name
 freshName n = ParseM $ \s -> let (ids', x) = Name.freshName (ids s) n in (s { ids = ids' }, [], x)
 
 freshFloatName :: String -> Term -> ParseM (Maybe (Var, Term), Name)
-freshFloatName _ (I (Var x)) = return (Nothing, x)
+freshFloatName _ (Identity (Var x)) = return (Nothing, x)
 freshFloatName n e           = freshName n >>= \x -> return (Just (x, e), x)
 
 float :: [(Var, Term)] -> ParseM ()
@@ -187,7 +207,7 @@ declCore (LHE.FunBind [LHE.Match _loc n pats _mb_type@Nothing (LHE.UnGuardedRhs 
     (ys, _bound_ns, build) <- patCores pats
     e <- bindFloatsWith $ liftM2 (,) (declsCore where_decls) (expCore e)
     return [(x, lambdas ys $ build e)]
-declCore (LHE.PatBind _loc pat _mb_ty@Nothing (LHE.UnGuardedRhs e) _binds@(LHE.BDecls where_decls)) = do
+declCore (LHE.PatBind _loc pat (LHE.UnGuardedRhs e) _binds@(LHE.BDecls where_decls)) = do
     (x, bound_ns, build) <- patCore pat
     e <- bindFloatsWith $ liftM2 (,) (declsCore where_decls) (expCore e)
     return $ (x, e) : [(n, build (var n)) | n <- bound_ns, n /= x]
@@ -203,7 +223,7 @@ expCore (LHE.InfixApp e1 eop e2) = qopCore eop >>= \eop -> expCore e1 >>= \e1 ->
 expCore (LHE.Let (LHE.BDecls binds) e) = bindFloatsWith $ liftM2 (,) (declsCore binds) (expCore e)
 expCore (LHE.If e1 e2 e3) = expCore e1 >>= \e1 -> liftM2 (if_ e1) (expCore e2) (expCore e3)
 expCore (LHE.Case e alts) = expCore e >>= \e -> fmap (scrutinise e) (mapM altCore alts)
-expCore (LHE.Tuple es) = mapM expCore es >>= tupleCore
+expCore (LHE.Tuple _boxed es) = mapM expCore es >>= tupleCore
 expCore (LHE.Paren e) = expCore e
 expCore (LHE.List es) = mapM expCore es >>= listCore
 expCore (LHE.Lambda _ ps e) = patCores ps >>= \(xs, _bound_xs, build) -> fmap (lambdas xs) $ bindFloats $ fmap build (expCore e)
@@ -225,7 +245,7 @@ literalCore (LHE.Char c) = charCore c
 literalCore (LHE.String s) = stringCore s
 
 altCore :: LHE.Alt -> ParseM Alt
-altCore (LHE.Alt _loc pat (LHE.UnGuardedAlt e) (LHE.BDecls binds)) = do
+altCore (LHE.Alt _loc pat (LHE.UnGuardedRhs e) (LHE.BDecls binds)) = do
     (altcon, build) <- altPatCore pat
     e <- bindFloatsWith $ liftM2 (,) (declsCore binds) (expCore e)
     return (altcon, build e)
@@ -234,11 +254,11 @@ altCore (LHE.Alt _loc pat (LHE.UnGuardedAlt e) (LHE.BDecls binds)) = do
 altPatCore :: LHE.Pat -> ParseM (AltCon, Term -> Term)
 altPatCore (LHE.PApp qname pats)           = liftM (dataAlt (qNameDataCon qname)) (patCores pats)
 altPatCore (LHE.PInfixApp pat1 qname pat2) = liftM (dataAlt (qNameDataCon qname)) (patCores [pat1, pat2])
-altPatCore (LHE.PTuple [pat1, pat2])       = liftM (dataAlt pairDataCon) (patCores [pat1, pat2])
+altPatCore (LHE.PTuple _boxed [pat1, pat2])       = liftM (dataAlt pairDataCon) (patCores [pat1, pat2])
 altPatCore (LHE.PParen pat)                = altPatCore pat
 altPatCore (LHE.PList [])                  = return $ dataAlt nilDataCon ([], [], id)
-altPatCore (LHE.PLit (LHE.Int i))          = return (LiteralAlt (Int i), id)
-altPatCore (LHE.PLit (LHE.Char c))         = return (LiteralAlt (Char c), id)
+altPatCore (LHE.PLit sign (LHE.Int i))     = return (LiteralAlt (Int i), id) -- TODO: sign
+altPatCore (LHE.PLit sign (LHE.Char c))    = return (LiteralAlt (Char c), id) -- TODO: sign
 altPatCore (LHE.PVar x)                    = return (DefaultAlt (Just (name (nameString x))), id) -- TODO: this is not quite right, because case on variable is not
 altPatCore LHE.PWildCard                   = return (DefaultAlt Nothing, id)                      -- strict in Haskell. But the standard library depends on it being so...
 altPatCore p = panic "altPatCore" (text $ show p)
@@ -307,7 +327,7 @@ patCore (LHE.PVar n)    = return (x, [x], id)
   where x = name (nameString n)
 patCore LHE.PWildCard   = fmap (\x -> (x, [x], id)) $ freshName "_"
 patCore (LHE.PParen p)  = patCore p
-patCore (LHE.PTuple ps) = case tupleDataCon (length ps) of
+patCore (LHE.PTuple _boxed ps) = case tupleDataCon (length ps) of
     Nothing | [p] <- ps -> patCore p
     Just dc -> tuplePatCore dc ps
 patCore (LHE.PApp (LHE.Special LHE.UnitCon) []) = tuplePatCore unitDataCon []
@@ -341,7 +361,7 @@ scrutinise e alts = case_ e expanded_alts
                                    -- NB: use supply of totally fresh names to avoid introducing shadowing
                                  , let xs = snd $ freshNames expandIdSupply (replicate arity "xpand")
                                  ]
-        
+
         let (def_alts, other_alts) = extractJusts (\alt -> do { (DefaultAlt mb_x, e) <- Just alt; return (mb_x, e) }) alts
         fmap (other_alts ++) $ case def_alts of
             -- We only need to expand defaults if we have a default (which also means that everything is covered)

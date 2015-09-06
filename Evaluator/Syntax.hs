@@ -12,25 +12,27 @@ import Core.Tag
 import Renaming
 import Utilities
 
+import Data.Copointed
+import Data.Functor.Compose
+import Data.List (foldl')
 import qualified Data.Map as M
 
-
-type Anned = Tagged :.: Sized :.: FVed
+type Anned = Compose Tagged (Compose Sized FVed)
 type AnnedTerm = Anned (TermF Anned)
 type AnnedValue = ValueF Anned
 type AnnedAlt = AltF Anned
 
 annee :: Anned a -> a
-annee = extract
+annee = copoint
 
 annedSize :: Anned a -> Size
-annedSize = size . unComp . tagee . unComp
+annedSize = size . getCompose . tagee . getCompose
 
 annedFreeVars :: Anned a -> FreeVars
-annedFreeVars = freeVars . sizee . unComp . tagee . unComp
+annedFreeVars = freeVars . sizee . getCompose . tagee . getCompose
 
 annedTag :: Anned a -> Tag
-annedTag = tag . unComp
+annedTag = tag . getCompose
 
 
 annedVarFreeVars' = taggedSizedFVedVarFreeVars'
@@ -59,22 +61,22 @@ detagAnnedAlts = taggedSizedFVedAltsToFVedAlts
 
 
 annedVar :: Tag -> Var -> Anned Var
-annedVar   tg x = Comp (Tagged tg (Comp (Sized (annedVarSize' x)   (FVed (annedVarFreeVars' x)  x))))
+annedVar   tg x = Compose (Tagged tg (Compose (Sized (annedVarSize' x)   (FVed (annedVarFreeVars' x)  x))))
 
 annedTerm :: Tag -> TermF Anned -> AnnedTerm
-annedTerm  tg e = Comp (Tagged tg (Comp (Sized (annedTermSize' e)  (FVed (annedTermFreeVars' e)  e))))
+annedTerm  tg e = Compose (Tagged tg (Compose (Sized (annedTermSize' e)  (FVed (annedTermFreeVars' e)  e))))
 
 annedValue :: Tag -> ValueF Anned -> Anned AnnedValue
-annedValue tg v = Comp (Tagged tg (Comp (Sized (annedValueSize' v) (FVed (annedValueFreeVars' v) v))))
+annedValue tg v = Compose (Tagged tg (Compose (Sized (annedValueSize' v) (FVed (annedValueFreeVars' v) v))))
 
 
 toAnnedTerm :: IdSupply -> Term -> AnnedTerm
 toAnnedTerm tag_ids = tagFVedTerm tag_ids . reflect
 
 
-data QA = Question Var
-        | Answer   (ValueF Anned)
-        deriving (Show)
+data QA
+  = Question Var
+  | Answer   (ValueF Anned)
 
 instance Pretty QA where
     pPrintPrec level prec = pPrintPrec level prec . qaToAnnedTerm'
@@ -104,16 +106,7 @@ data HowBound = InternallyBound | LambdaBound | LetBound
 instance Pretty HowBound where
     pPrint = text . show
 
-instance NFData HowBound
-
 data HeapBinding = HB { howBound :: HowBound, heapBindingMeaning :: Either (Maybe Tag) (In AnnedTerm) }
-                 deriving (Show)
-
-instance NFData HeapBinding where
-    rnf (HB a b) = rnf a `seq` rnf b
-
-instance NFData Heap where
-    rnf (Heap a b) = rnf a `seq` rnf b
 
 instance Pretty HeapBinding where
     pPrintPrec level prec (HB how mb_in_e) = case how of
@@ -131,25 +124,20 @@ environmentallyBound :: Tag -> HeapBinding
 environmentallyBound tg = HB LetBound (Left (Just tg))
 
 type PureHeap = M.Map (Out Var) HeapBinding
+
 data Heap = Heap PureHeap IdSupply
-          deriving (Show)
 
 instance Pretty Heap where
     pPrintPrec level prec (Heap h _) = pPrintPrec level prec h
 
 
 type Stack = [Tagged StackFrame]
-data StackFrame = Apply (Out Var)
-                | Scrutinise (In [AnnedAlt])
-                | PrimApply PrimOp [In (Anned AnnedValue)] [In AnnedTerm]
-                | Update (Out Var)
-                deriving (Show)
 
-instance NFData StackFrame where
-    rnf (Apply a)         = rnf a
-    rnf (Scrutinise a)    = rnf a
-    rnf (PrimApply a b c) = rnf a `seq` rnf b `seq` rnf c
-    rnf (Update a)        = rnf a
+data StackFrame
+  = Apply (Out Var)
+  | Scrutinise (In [AnnedAlt])
+  | PrimApply PrimOp [In (Anned AnnedValue)] [In AnnedTerm]
+  | Update (Out Var)
 
 instance Pretty StackFrame where
     pPrintPrec level prec kf = case kf of

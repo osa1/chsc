@@ -1,5 +1,5 @@
-{-# LANGUAGE CPP, DeriveFoldable, DeriveFunctor, DeriveTraversable,
-             ExistentialQuantification, FlexibleInstances,
+{-# LANGUAGE CPP, DeriveFoldable, DeriveFunctor, DeriveGeneric,
+             DeriveTraversable, ExistentialQuantification, FlexibleInstances,
              GeneralizedNewtypeDeriving, IncoherentInstances, PatternGuards,
              TupleSections, TypeOperators, TypeSynonymInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -24,8 +24,12 @@ import StaticFlags
 import Control.Arrow (first, second, (&&&), (***))
 import Control.DeepSeq (NFData (..), rnf)
 import Control.Monad hiding (join)
+import Control.Monad.Identity
 
+import Data.Copointed
 import qualified Data.Foldable as Foldable
+import Data.Functor.Classes
+import Data.Functor.Compose
 import qualified Data.Graph.Wrapper as G
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
@@ -46,16 +50,8 @@ import qualified Text.PrettyPrint.HughesPJClass as Pretty
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 
-
--- | Copointed functors. The defining property is:
---
---   extract (fmap f a) == f (extract a)
-class Functor f => Copointed f where
-    extract :: f a -> a
-
-instance Copointed ((,) a) where
-    extract = snd
-
+instance (Pretty1 f, Pretty a) => Pretty (f a) where
+    pPrintPrec = pPrintPrec1
 
 class Functor z => Zippable z where
     -- Naturality:
@@ -87,80 +83,11 @@ instance Monad (Either a) where
 #endif
 #endif
 
-
-hnf :: NFData a => a -> a
-hnf x = rnf x `seq` x
-
-infixr 8 $!!
-
-($!!) :: NFData a => (a -> b) -> a -> b
-f $!! x = rnf x `seq` f x
-
-
-class Show1 f where
-    showsPrec1 :: Show a => Int -> f a -> ShowS
-
-instance (Show1 f, Show a) => Show (f a) where
-    showsPrec = showsPrec1
-
-
-class Eq1 f where
-    eq1 :: Eq a => f a -> f a -> Bool
-
-instance (Eq1 f, Eq a) => Eq (f a) where
-    (==) = eq1
-
-
-class Eq1 f => Ord1 f where
-    compare1 :: Ord a => f a -> f a -> Ordering
-
-instance (Ord1 f, Ord a) => Ord (f a) where
-    compare = compare1
-
-
-class NFData1 f where
-    rnf1 :: NFData a => f a -> ()
-
-instance (NFData1 f, NFData a) => NFData (f a) where
-    rnf = rnf1
-
 class Pretty1 f where
     pPrintPrec1 :: Pretty a => PrettyLevel -> Rational -> f a -> Doc
 
-
-instance NFData Id where
-    rnf i = rnf (hashedId i)
-
-instance NFData a => NFData1 ((,) a) where
-    rnf1 (a, b) = rnf a `seq` rnf b
-
-
-newtype (f :.: g) a = Comp { unComp :: f (g a) }
-    deriving (Functor, Foldable)
-
-infixr 9 :.:
-
-instance (Copointed f, Copointed g) => Copointed (f :.: g) where
-    extract = extract . extract . unComp
-
-instance (Show1 f, Show1 g) => Show1 (f :.: g) where
-    showsPrec1 prec (Comp x) = showParen (prec >= appPrec) (showString "Comp" . showsPrec appPrec x)
-
-instance (Eq1 f, Eq1 g) => Eq1 (f :.: g) where
-    eq1 (Comp x1) (Comp x2) = x1 == x2
-
-instance (Ord1 f, Ord1 g) => Ord1 (f :.: g) where
-    compare1 (Comp x1) (Comp x2) = x1 `compare` x2
-
-instance (NFData1 f, NFData1 g) => NFData1 (f :.: g) where
-    rnf1 (Comp x) = rnf x
-
-instance (Pretty1 f, Pretty1 g) => Pretty1 (f :.: g) where
-    pPrintPrec1 level prec (Comp x) = pPrintPrec level prec x
-
-instance (Traversable.Traversable f, Traversable.Traversable g) => Traversable.Traversable (f :.: g) where
-    traverse f = fmap Comp . Traversable.traverse (Traversable.traverse f) . unComp
-
+instance (Pretty1 f, Pretty1 g) => Pretty1 (Compose f g) where
+    pPrintPrec1 level prec (Compose x) = pPrintPrec level prec x
 
 newtype Down a = Down { unDown :: a } deriving (Eq)
 
@@ -172,15 +99,13 @@ instance Ord a => Ord (Down a) where
 type Nat = Int
 
 
-newtype Fin = Fin { unFin :: Int } deriving (Eq, Ord, Show, NFData, Pretty)
+newtype Fin = Fin { unFin :: Int }
+  deriving (Eq, Ord, Show, NFData, Pretty)
+
 type FinSet = IS.IntSet
 type FinMap = IM.IntMap
 
-
 data Tag = TG { tagFin :: Fin, tagOccurrences :: Nat } deriving (Eq, Ord, Show)
-
-instance NFData Tag where
-    rnf (TG a b) = rnf a `seq` rnf b
 
 instance Pretty Tag where
     pPrint (TG i occs) = pPrint i <> brackets (pPrint occs)
@@ -194,11 +119,12 @@ injectTag cls (TG (Fin i) occs) = TG (Fin (cls * i)) occs
 tagInt :: Tag -> Int
 tagInt = unFin . tagFin
 
-data Tagged a = Tagged { tag :: !Tag, tagee :: !a }
-              deriving (Functor, Foldable.Foldable, Traversable.Traversable)
+data Tagged a
+  = Tagged { tag :: !Tag, tagee :: !a }
+  deriving (Functor, Foldable.Foldable, Traversable.Traversable, Show)
 
 instance Copointed Tagged where
-    extract = tagee
+    copoint = tagee
 
 instance Show1 Tagged where
     showsPrec1 prec (Tagged tg x) = showParen (prec >= appPrec) (showString "Tagged" . showsPrec appPrec tg . showsPrec appPrec x)
@@ -208,9 +134,6 @@ instance Eq1 Tagged where
 
 instance Ord1 Tagged where
     compare1 (Tagged tg1 x1) (Tagged tg2 x2) = (tg1, x1) `compare` (tg2, x2)
-
-instance NFData1 Tagged where
-    rnf1 (Tagged a b) = rnf a `seq` rnf b
 
 instance Pretty1 Tagged where
     pPrintPrec1 level prec (Tagged tg x) = braces (pPrint tg) <+> pPrintPrec level prec x
@@ -222,7 +145,7 @@ data Sized a = Sized { size :: !Size, sizee :: !a }
              deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Copointed Sized where
-    extract = sizee
+    copoint = sizee
 
 instance Show1 Sized where
     showsPrec1 prec (Sized sz x) = showParen (prec >= appPrec) (showString "Sized" . showsPrec appPrec sz . showsPrec appPrec x)
@@ -232,9 +155,6 @@ instance Eq1 Sized where
 
 instance Ord1 Sized where
     compare1 (Sized sz1 x1) (Sized sz2 x2) = (sz1, x1) `compare` (sz2, x2)
-
-instance NFData1 Sized where
-    rnf1 (Sized a b) = rnf a `seq` rnf b
 
 instance Pretty1 Sized where
     pPrintPrec1 level prec (Sized sz x) = bananas (text (show sz)) <> pPrintPrec level prec x
@@ -652,36 +572,6 @@ mapAccumM :: (Traversable.Traversable t, Monoid m) => (a -> (m, b)) -> t a -> (m
 mapAccumM f ta = Traversable.mapAccumL (\m a -> case f a of (m', b) -> (m `mappend` m', b)) mempty ta
 
 
-newtype Identity a = I { unI :: a }
-                   deriving (Functor, Foldable.Foldable, Traversable.Traversable)
-
-instance Show1 Identity where
-    showsPrec1 prec (I x) = showParen (prec >= appPrec) (showString "Identity" . showsPrec appPrec x)
-
-instance Eq1 Identity where
-    eq1 (I x1) (I x2) = x1 == x2
-
-instance Ord1 Identity where
-    compare1 (I x1) (I x2) = x1 `compare` x2
-
-instance NFData1 Identity where
-    rnf1 (I x) = rnf x
-
-instance Pretty1 Identity where
-    pPrintPrec1 level prec (I x) = pPrintPrec level prec x
-
-instance Copointed Identity where
-    extract = unI
-
-instance Applicative Identity where
-    pure = I
-    I a <*> I b = I $ a b
-
-instance Monad Identity where
-    return = I
-    mx >>= fxmy = fxmy (unI mx)
-
-
 sumMap :: (Foldable.Foldable f, Num b) => (a -> b) -> f a -> b
 sumMap f = Foldable.foldr (\x n -> f x + n) 0
 
@@ -690,7 +580,7 @@ class (Functor t, Foldable.Foldable t) => Accumulatable t where
     mapAccumT  ::            (acc -> x ->   (acc, y)) -> acc -> t x ->   (acc, t y)
     mapAccumTM :: Monad m => (acc -> x -> m (acc, y)) -> acc -> t x -> m (acc, t y)
 
-    mapAccumT f acc x = unI (mapAccumTM (\acc' x' -> I (f acc' x')) acc x)
+    mapAccumT f acc x = runIdentity (mapAccumTM (\acc' x' -> Identity (f acc' x')) acc x)
 
 fmapDefault :: (Accumulatable t) => (a -> b) -> t a -> t b
 fmapDefault f = snd . mapAccumT (\() x -> ((), f x)) ()
@@ -719,7 +609,8 @@ concatMapM f = go
         liftM (ys ++) $ go xs
 
 instance Ord k => Accumulatable (M.Map k) where
-    mapAccumTM f acc = liftM (second M.fromList) . mapAccumTM (\acc (k, x) -> liftM (second (k,)) (f acc x)) acc . M.toList
+    mapAccumTM f acc =
+      (second M.fromList) <.> mapAccumTM (\acc (k, x) -> liftM (second (k,)) (f acc x)) acc . M.toList
 
 
 type Seconds = Double
@@ -733,8 +624,15 @@ time act = do { start <- getTime; res <- act; end <- getTime; return (end - star
 getTime :: IO Seconds
 getTime = (fromRational . toRational) `fmap` getPOSIXTime
 
-
 type Bytes = Integer
 
 fileSize :: FilePath -> IO Bytes
 fileSize file = withFile file ReadMode hFileSize
+
+infixl 4 <.>
+(<.>) :: Functor f => (b -> c) -> (a -> f b) -> (a -> f c)
+f1 <.> f2 = fmap f1 . f2
+{-# INLINE (<.>) #-}
+
+instance Pretty1 Identity where
+  pPrintPrec1 level prec t = pPrintPrec1 level prec t

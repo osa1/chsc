@@ -1,19 +1,22 @@
 {-# LANGUAGE RankNTypes #-}
+
 module Core.Tag where
 
 import Utilities
+
+import Control.Monad.Identity
+import Data.Copointed
+import Data.Functor.Compose
 
 import Core.FreeVars
 import Core.Size
 import Core.Syntax
 
-
 tagTerm :: IdSupply -> Term -> TaggedTerm
-tagTerm = mkTagger (\i f (I e) -> Tagged (mkTag (hashedId i)) (f e))
+tagTerm = mkTagger (\i f (Identity e) -> Tagged (mkTag (hashedId i)) (f e))
 
 tagFVedTerm :: IdSupply -> SizedFVedTerm -> TaggedSizedFVedTerm
-tagFVedTerm = mkTagger (\i f e -> Comp (Tagged (mkTag (hashedId i)) (fmap f e)))
-
+tagFVedTerm = mkTagger (\i f e -> Compose (Tagged (mkTag (hashedId i)) (fmap f e)))
 
 {-# INLINE mkTagger #-}
 mkTagger :: (forall a b. Id -> (a -> b) -> ann a -> ann' b)
@@ -41,15 +44,29 @@ mkTagger rec = term
         Literal l  -> Literal l
 
     alternatives = zipWith alternative . splitIdSupplyL
-    
+
     alternative ids (con, e) = (con, term ids e)
 
 
-(taggedTermToTerm,              taggedAltsToAlts,              taggedValueToValue,              taggedValue'ToValue')              = mkDetag (\f e -> I (f (tagee e)))
-(fVedTermToTerm,                fVedAltsToAlts,                fVedValueToValue,                fVedValue'ToValue')                = mkDetag (\f e -> I (f (fvee e)))
-(taggedSizedFVedTermToTerm,     taggedSizedFVedAltsToAlts,     taggedSizedFVedValueToValue,     taggedSizedFVedValue'ToValue')     = mkDetag (\f e -> I (f (fvee (sizee (unComp (tagee (unComp e)))))))
-(taggedSizedFVedTermToFVedTerm, taggedSizedFVedAltsToFVedAlts, taggedSizedFVedValueToFVedValue, taggedSizedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (sizee (unComp (tagee (unComp e))))) (f (extract e)))
+(taggedTermToTerm,
+ taggedAltsToAlts,
+ taggedValueToValue,
+ taggedValue'ToValue') = mkDetag (\f e -> Identity (f (tagee e)))
 
+(fVedTermToTerm,
+ fVedAltsToAlts,
+ fVedValueToValue,
+ fVedValue'ToValue') = mkDetag (\f e -> Identity (f (fvee e)))
+
+(taggedSizedFVedTermToTerm,
+ taggedSizedFVedAltsToAlts,
+ taggedSizedFVedValueToValue,
+ taggedSizedFVedValue'ToValue') = mkDetag (\f e -> Identity (f (fvee (sizee (getCompose (tagee (getCompose e)))))))
+
+(taggedSizedFVedTermToFVedTerm,
+ taggedSizedFVedAltsToFVedAlts,
+ taggedSizedFVedValueToFVedValue,
+ taggedSizedFVedValue'ToFVedValue') = mkDetag (\f e -> FVed (freeVars (sizee (getCompose (tagee (getCompose e))))) (f (copoint e)))
 
 {-# INLINE mkDetag #-}
 mkDetag :: (forall a b. (a -> b) -> ann a -> ann' b)

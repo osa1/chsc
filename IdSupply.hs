@@ -1,4 +1,4 @@
-{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, MagicHash #-}
 
 -- | This module provides splittable supplies for unique identifiers.
 --   The main idea gows back to L. Augustsson, M. Rittri, and D. Synek
@@ -16,25 +16,26 @@ module IdSupply (
 
 import GHC.Exts
 -- MCB: change to uniqueid-0.1.1: use GHC.IO rather than GHC.IOBase
-import GHC.IO ( unsafeDupableInterleaveIO )
+import GHC.IO (unsafeDupableInterleaveIO)
 
-import Control.DeepSeq (NFData(..))
+import Control.DeepSeq (NFData (..))
 
 import Data.IORef
-import System.IO.Unsafe ( unsafePerformIO )
+import System.IO.Unsafe (unsafePerformIO)
 
 
 -- | Unique identifiers are of type 'Id' and can be hashed to an 'Int'
 --   usning the function 'hashedId'.
 newtype Id = Id { hashedId :: Int }
+  deriving (NFData)
 
 -- | Supplies for unique identifiers are of type 'IdSupply' and can be
 --   split into two new supplies or yield a unique identifier.
 data IdSupply = IdSupply Int# IdSupply IdSupply
 
 instance NFData IdSupply where
+    -- Better not rnf the infinite tree of supplies...
     rnf _ = ()
-    -- NB: better not rnf the infinite tree of supplies...
 
 -- | Generates a new supply of unique identifiers. The given character
 --   is prepended to generated numbers.

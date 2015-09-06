@@ -1,19 +1,15 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, TupleSections, DeriveFunctor, DeriveFoldable, DeriveTraversable,
-             MultiParamTypeClasses, FlexibleInstances, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveFoldable, DeriveFunctor, DeriveTraversable,
+             FlexibleInstances, GeneralizedNewtypeDeriving,
+             MultiParamTypeClasses, PatternGuards, TupleSections, ViewPatterns
+             #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Split (MonadStatics(..), split, generalise) where
-
-import Core.FreeVars
-import Core.Renaming
-import Core.Syntax
 
 import Evaluator.Deeds
 import Evaluator.Evaluate (normalise)
 import Evaluator.FreeVars
 import Evaluator.Residualise
 import Evaluator.Syntax
-
-import Termination.Generaliser (Generaliser(..))
 
 import Name
 import Renaming
@@ -23,16 +19,23 @@ import Utilities hiding (tails)
 import Algebra.Lattice
 
 import qualified Data.Foldable as Foldable
-import qualified Data.Traversable as Traversable
+import qualified Data.IntSet as IS
+import Data.List (mapAccumL, zipWith4)
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Data.IntSet as IS
+import qualified Data.Traversable as Traversable
+
+import Core.FreeVars
+import Core.Renaming
+import Core.Syntax
+
+import Termination.Generaliser (Generaliser (..))
 
 
 class Monad m => MonadStatics m where
     bindCapturedFloats :: FreeVars -> m a -> m (Out [(Var, FVedTerm)], a)
     bindCapturedFloats fvs mx = bindCapturedFloats' fvs mx (\hes x -> return (hes, x))
-    
+
     bindCapturedFloats' :: FreeVars -> m a -> (Out [(Var, FVedTerm)] -> a -> m r) -> m r
 
 
@@ -139,7 +142,7 @@ generalise :: MonadStatics m
            -> Maybe ((State -> m (Deeds, Out FVedTerm)) -> m (Deeds, Out FVedTerm))
 generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
     let named_k = [0..] `zip` k
-    
+
     (gen_kfs, gen_xs') <- case gENERALISATION of
         NoGeneralisation -> Nothing
         AllEligible -> guard (not (IS.null gen_kfs) || not (S.null gen_xs')) >> return (gen_kfs, gen_xs')
@@ -154,7 +157,7 @@ generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
                 -- This is motivated by how the interaction with subgraph generalisation for TreeFlip/TreeSum.
                 -- FIXME: explain in more detail if this turns out to be sane.
                 possibilities = findGeneralisable False S.empty (reverse named_k) h
-                
+
                 findGeneralisable :: Bool -> FreeVars -> NamedStack -> PureHeap -> [(IS.IntSet, S.Set (Out Var))]
                 findGeneralisable done_qa pending_xs' unreached_kfs unreached_hbs
                    | done_qa && null pending_kfs && M.null pending_hbs
@@ -166,17 +169,17 @@ generalise gen (deeds, Heap h ids, k, (rn, qa)) = do
                     (done_qa', extra_pending_xs') = if done_qa || not (null unreached_kfs) then (done_qa, S.empty) else (True, inFreeVars annedFreeVars (rn, qa))
                     (pending_kfs, unreached_kfs') = splitAt 1 unreached_kfs
                     (pending_hbs, unreached_hbs') = M.partitionWithKey (\x' _hb -> x' `S.member` (pending_xs' `S.union` extra_pending_xs')) unreached_hbs
-                    
+
                     gen_kf_is = IS.fromList [i  | (i, kf) <- pending_kfs, generaliseStackFrame gen kf]
                     gen_xs' = S.fromList  [x' | (x', hb) <- M.toList pending_hbs, generaliseHeapBinding gen x' hb, assertRender ("Bad generalisation", x', hb, heapBindingTag hb) (not (howBound hb == LambdaBound && isNothing (heapBindingTerm hb))) True]
-                    
+
                     reached_xs' = M.foldrWithKey (\_x' hb fvs -> heapBindingFreeVars hb `S.union` fvs)
                                                  (S.unions (map (stackFrameFreeVars . tagee . snd) pending_kfs))
                                                  pending_hbs
-    
+
     -- If we can find some fraction of the stack or heap to drop that looks like it will be admissable, just residualise those parts and continue
     traceRender ("gen_kfs", gen_kfs, "gen_xs'", gen_xs') $ return ()
-    
+
     let (ids', ctxt_id) = stepIdSupply ids
     return $ \opt -> generaliseSplit opt (gen_kfs, gen_xs') deeds (Heap h ids', named_k, ([], oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], (rn, fmap qaToAnnedTerm' qa)))))
 
@@ -274,7 +277,7 @@ generaliseSplit opt split_from deeds prepared_state = optimiseSplit opt deeds' b
 -- After splitting:
 --   let x = 2
 --   in x + 2
--- 
+--
 -- That's fine, but how are we going to get a reference to the "x" when residualising the y binding above?
 --  let z = f x
 --      y = unk + z
@@ -283,11 +286,11 @@ generaliseSplit opt split_from deeds prepared_state = optimiseSplit opt deeds' b
 -- Lacking extra language features, our only option is to under-specialise the floats by inlining less
 -- evaluation context.
 data Bracketed a = Bracketed {
-    rebuild :: [Out FVedTerm] -> Out FVedTerm, -- Rebuild the full output term given outputs to plug into each hole
+    rebuild  :: [Out FVedTerm] -> Out FVedTerm, -- Rebuild the full output term given outputs to plug into each hole
     extraFvs :: FreeVars,                      -- Maximum free variables added by the residual wrapped around the holes
     extraBvs :: [BoundVars],                   -- Maximum bound variables added at each hole by the residual wrapped around the holes
-    fillers :: [a],                            -- Hole-fillers themselves. Usually State
-    tails :: Maybe [Int]                       -- The indexes of all holes in tail position. If this is not Nothing, this is an *exhaustive* list of possible tail positions.
+    fillers  :: [a],                            -- Hole-fillers themselves. Usually State
+    tails    :: Maybe [Int]                       -- The indexes of all holes in tail position. If this is not Nothing, this is an *exhaustive* list of possible tail positions.
   } deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Accumulatable Bracketed where
@@ -406,24 +409,24 @@ optimiseSplit :: MonadStatics m
 optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
     -- 0) The "process tree" splits at this point. We can choose to distribute the deeds between the children in a number of ways
     let bracketSizes = map stateSize . fillers
-        
+
         (heap_xs, bracketeds_heap_elts) = unzip (M.toList bracketeds_heap)
         -- NB: it is *very important* that the list supplied to apportion contains at least one element and at least one non-zero weight, or some
         -- deeds will vanish in a puff of digital smoke. We deal with this in the proportional case by padding the input list with a 1
         (deeds_initial:deeds_focus, deedss_heap)
           | Proportional <- dEEDS_POLICY = transformWholeList (apportion deeds) (1 : bracketSizes bracketed_focus) (map bracketSizes bracketeds_heap_elts)
           | otherwise                    = (deeds : [0 | _ <- bracketSizes bracketed_focus], [[0 | _ <- bracketSizes b] | b <- bracketeds_heap_elts])
-        
+
         bracketeds_deeded_heap = M.fromList (heap_xs `zip` zipWith (\deeds_heap -> modifyFillers (zipWith addStateDeeds deeds_heap)) deedss_heap bracketeds_heap_elts)
         bracketed_deeded_focus = modifyFillers (zipWith addStateDeeds deeds_focus) bracketed_focus
-    
+
     assertRenderM (text "optimiseSplit: deeds lost or gained!", deeds, (deeds_initial, deeds_focus, deedss_heap))
                   (noChange (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_heap        + releaseBracketedDeeds releaseStateDeed bracketed_focus        + deeds)
                             (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + releaseBracketedDeeds releaseStateDeed bracketed_deeded_focus + deeds_initial))
-    
+
     -- 1) Recursively drive the focus itself
     let extra_statics = M.keysSet bracketeds_heap
-    bindCapturedFloats' extra_statics (optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)) $ \hes (leftover_deeds, e_focus) -> do    
+    bindCapturedFloats' extra_statics (optimiseBracketed opt (deeds_initial, bracketed_deeded_focus)) $ \hes (leftover_deeds, e_focus) -> do
         -- 2) We now need to think about how we are going to residualise the letrec. In fact, we need to loop adding
         -- stuff to the letrec because it might be the case that:
         --  * One of the hes from above refers to some heap binding that is not referred to by the let body
@@ -431,7 +434,7 @@ optimiseSplit opt deeds bracketeds_heap bracketed_focus = do
         --  * And after driving that we find in our new hes a new h function referring to a new free variable
         --    that refers to some binding that is as yet unbound...
         (leftover_deeds, bracketeds_deeded_heap, xes, _fvs) <- go hes extra_statics leftover_deeds bracketeds_deeded_heap [] (fvedTermFreeVars e_focus)
-    
+
         -- 3) Combine the residualised let bindings with the let body
         return (sumMap (releaseBracketedDeeds releaseStateDeed) bracketeds_deeded_heap + leftover_deeds,
                 letRecSmart xes e_focus)
@@ -495,7 +498,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
     -- corresponding variables are free *after driving*. Of course, we have no way of knowing which bindings
     -- will get this treatment here, so just treat resid_xs as being exactly the set of residualised stuff.
     split_fp = lfpFrom (S.empty, S.empty) (fst . split_step)
-    
+
     -- Simultaneously computes the next fixed-point step and some artifacts computed along the way,
     -- which happen to correspond to exactly what I need to return from splitt.
     split_step (safe_not_resid_xs, deeds_resid_xs) = -- let pPrintBracketedState = map pPrintFullState . fillers in traceRender ("split_step", (not_resid_xs, bound_xs S.\\ not_resid_xs), pureHeapBoundVars h_not_residualised, pureHeapBoundVars h_residualised, M.map pPrintBracketedState bracketeds_heap', pPrintBracketedState bracketed_focus') $
@@ -504,7 +507,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- 0) Compute the set of variables that I can *actually* get away without residualising, once deeds are accounted for
         -- See Note [Deeds and splitting] for further details on this.
         not_resid_xs = safe_not_resid_xs S.\\ deeds_resid_xs
-        
+
         -- 1) Build a candidate splitting for the Stack and QA components
         -- When creating the candidate stack split, we ensure that we create a residual binding
         -- for any variable in the resid_xs set, as we're not going to inline it to continue.
@@ -516,7 +519,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         (deeds1a, bracketeds_updated, bracketed_focus)
           = (\(a, b, c) -> (a, M.map fill_ids b, fill_ids c)) $
             pushStack ids deeds scruts [(need_not_resid_kf i kf, kf) | (i, kf) <- named_k] bracketed_qa
-            
+
         need_not_resid_kf i kf
           | i `IS.member` gen_kfs
           = False
@@ -524,7 +527,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
           = x' `S.member` not_resid_xs
           | otherwise
           = True
-        
+
         -- 2) Build a splitting for those elements of the heap we propose to residualise not in not_resid_xs
         -- TODO: I should residualise those Unfoldings whose free variables have become interesting due to intervening scrutinisation
         (h_not_residualised, h_residualised) = M.partitionWithKey (\x' _ -> x' `S.member` not_resid_xs) h
@@ -537,9 +540,9 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         (deeds1, bracketeds_nonupdated) = (deeds1a, M.map snd bracketeds_nonupdated0)
         -- For every heap binding we ever need to deal with, contains a version of that heap binding as a concrete Bracketed thing
         bracketeds_heap = bracketeds_updated `M.union` bracketeds_nonupdated
-        
+
         -- 3) Inline as much of the Heap as possible into the candidate splitting
-        
+
         -- 3a) Release deeds
         -- In order to make the Deeds-based stuff less conservative, my first action here is to release our claims to those deeds
         -- which we do *not* intend to create a residual let binding for here and now. This will let us always inline a heap-bound
@@ -548,7 +551,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         -- The equivalent process is done for the stack in splitStack itself: we just subtract 1 from the number of deeds we need to
         -- claim when duplicating a stack frame.
         deeds2 = releasePureHeapDeeds deeds1 h_not_residualised
-        
+
         -- 3b) Work out which part of the heap is admissable for inlining
         -- * We are allowed to inline concrete things which are duplicatable or are not residualised right here and now
         -- * Non-concrete stuff should be inlined if and only if it is not explicitly residualised by the caller. The motivation that
@@ -576,7 +579,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
                        (h_not_residualised `M.union`         -- Take any non-residualised bindings from the input heap/stack...
                         h_cheap_and_phantom `M.union`        -- ...failing which, take concrete definitions for cheap heap bindings (even if they are also residualised) or phantom definitions for expensive ones...
                         h_updated_phantoms)                  -- ...failing which, take phantoms for things bound by update frames (if supercompilation couldn't turn these into values, GHC is unlikely to get anything good from seeing defs)
-        
+
         -- Generalising the final proposed floats may cause some bindings that we *thought* were going to be inlined to instead be
         -- residualised. We need to account for this in the Entered information (for work-duplication purposes), and in that we will
         -- also require any FVs of the new residualised things that are bound in the stack to residualise more frames.
@@ -615,7 +618,7 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
                 -- We do the normalisation immediately afterwards - we can't do it before transitiveInline, precisely
                 -- because of the above hack (normalisation might add bindings to the heap).
                 state'@(deeds', heap', k', in_e') = normalise $ transitiveInline h_inlineable (deeds `addStateDeeds` state)
-        
+
         -- 3c) Actually do the inlining of as much of the heap as possible into the proposed floats
         -- We also take this opportunity to strip out the Entered information from each context.
         (deeds3, entered_focus, bracketed_focus') =                   inlineBracketHeap deeds2 bracketed_focus
@@ -646,10 +649,10 @@ splitt (gen_kfs, gen_xs) old_deeds (cheapifyHeap old_deeds -> (deeds, Heap h (sp
         --      value duplication, because the names of such bound things will be free in the proposed states.
         deeds_resid_xs' = deeds_resid_xs `S.union` (safe_not_resid_xs `S.intersection` (bracketedFreeVars stateFreeVars bracketed_focus' `S.union`
                                                                                         S.unions (map (bracketedFreeVars stateFreeVars) (M.elems bracketeds_heap'))))
-    
+
     -- Bound variables: those variables that I am interested in making a decision about whether to residualise or not
     bound_xs = pureHeapBoundVars h `S.union` stackBoundVars (map snd named_k)
-    
+
     -- Heap full of cheap expressions and any phantom stuff from the input heap but NOT from update frames
     -- Used within the main loop in the process of computing h_inlineable -- see comments there for the full meaning of this stuff.
     extract_cheap_hb hb
@@ -683,7 +686,7 @@ howToBindCheap e
 -- because it can prove impossible to get enough deeds to actually inline them. We apply a rather unsubtle (but safe)
 -- heuristic to deal with this situation, by monotonically growing a set of variables that we should *not* attempt
 -- to inline even though they appear in the safe_not_resid_xs set.
--- 
+--
 -- This really is extremely conservative, but if we're running out of deeds bad things will happen anyway, so who cares?
 --
 -- If we did not do this, then the bracketed_heap outgoing from splitt may not bind some of the variables free in what
@@ -741,13 +744,13 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
       state'
   where
     state' = (deeds', Heap h' ids, k, in_e)
-    
+
     (live', deeds', h') = heap_worker 0 deeds M.empty (stateFreeVars (deeds, Heap M.empty ids, k, in_e)) S.empty
-    
+
     -- NB: we prefer bindings from h to those from init_h_inlineable if there is any conflict. This is motivated by
     -- the fact that bindings from case branches are usually more informative than e.g. a phantom binding for the scrutinee.
     h_inlineable = h `M.union` init_h_inlineable
-    
+
     -- This function is rather performance critical: I originally benchmarked transitiveInline as taking 59.2% of runtime for DigitsOfE2!
     heap_worker :: Int -> Deeds -> PureHeap -> FreeVars -> FreeVars -> (FreeVars, Deeds, PureHeap)
     heap_worker n deeds h_output live live_in_let
@@ -755,9 +758,9 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
         if live == live'
         then (live', deeds', neutraliseLetLives live_in_let' h_output') -- NB: it's important we use the NEW versions of h_output/deeds, because we might have inlined extra stuff even though live hasn't changed!
         else heap_worker (n + 1) deeds' h_output' live' live_in_let'
-      where 
+      where
         (deeds', h_output', live', live_in_let') = M.foldrWithKey consider_inlining (deeds, h_output, live, live_in_let) ((h_inlineable `restrict` live) M.\\ h_output)
-        
+
         -- NB: we rely here on the fact that our caller will still be able to fill in bindings for stuff from h_inlineable
         -- even if we choose not to inline it into the State, and that such bindings will not be evaluated until they are
         -- actually demanded (or we could get work duplication by inlining into only *some* Once contexts).
@@ -779,7 +782,7 @@ transitiveInline init_h_inlineable _state@(deeds, Heap h ids, k, in_e)
       where how | termIsValue (snd in_e) = LetBound    -- Heuristic: only refer to *values* via a free variable, as those are the ones GHC will get some benefit from. TODO: make data/function distinction here?
                 | otherwise              = LambdaBound
     makeFreeForDeeds hb = panic "howToBind: should only be needed for internally bound things with a term" (pPrint hb)
-    
+
     -- Enforce the invariant that anything referred to by a LetBound thing cannot be LambdaBound
     neutraliseLetLives live_in_let = M.mapWithKey (\x' hb -> if howBound hb == LambdaBound && x' `S.member` live_in_let then hb { howBound = LetBound } else hb)
 
@@ -790,7 +793,7 @@ cheapifyHeap deeds heap | sPECULATION = (deeds, heap)
 cheapifyHeap deeds (Heap h (splitIdSupply -> (ids, ids'))) = (deeds', Heap (M.fromList [(x', internallyBound in_e) | (x', in_e) <- floats] `M.union` h') ids')
   where
     ((deeds', _, floats), h') = M.mapAccum (\(deeds, ids, floats0) hb -> case hb of HB InternallyBound (Right in_e) -> (case cheapify deeds ids in_e of (deeds, ids, floats1, in_e') -> ((deeds, ids, floats0 ++ floats1), HB InternallyBound (Right in_e'))); _ -> ((deeds, ids, floats0), hb)) (deeds, ids, []) h
-    
+
     -- TODO: make cheapification more powerful (i.e. deal with case bindings)
     cheapify :: Deeds -> IdSupply -> In AnnedTerm -> (Deeds, IdSupply, [(Out Var, In AnnedTerm)], In AnnedTerm)
     cheapify deeds0 ids0 (rn, (annee -> LetRec xes e)) = (deeds3, ids3, zip in_xs in_es' ++ floats0 ++ floats1, in_e')
@@ -886,7 +889,7 @@ splitStackFrame ids kf scruts bracketed_hole
       where -- 0) Manufacture context identifier
             (ids', state_ids) = splitIdSupply ids
             ctxt_id = idFromSupply state_ids
-            
+
             -- 1) Construct the floats for each case alternative
             (_alt_ids', alt_rns, alt_cons') = unzip3 $ map (renameAltCon ids' rn) alt_cons
             -- Bind something to the case scrutinee (if possible). This means that:
@@ -902,7 +905,7 @@ splitStackFrame ids kf scruts bracketed_hole
       where -- 0) Manufacture context identifier
             (ids', state_idss) = accumL splitIdSupply ids (length in_es)
             ctxt_ids = map idFromSupply state_idss
-            
+
             -- 1) Split every value and expression remaining apart
             bracketed_vs = map (splitValue ids' . fmap annee) in_vs
             bracketed_es  = zipWith (\ctxt_id in_e -> oneBracketed (Once ctxt_id, \ids -> (0, Heap M.empty ids, [], in_e))) ctxt_ids in_es)

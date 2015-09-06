@@ -1,14 +1,15 @@
-{-# LANGUAGE ViewPatterns, TupleSections, Rank2Types #-}
+{-# LANGUAGE Rank2Types, TupleSections, ViewPatterns #-}
 module Core.Renaming where
-
-import Core.FreeVars
-import Core.Syntax
 
 import Renaming
 import Utilities
 
+import Control.Monad.Identity
+import Data.Functor.Compose
 import qualified Data.Set as S
 
+import Core.FreeVars
+import Core.Syntax
 
 type In a = (Renaming, a)
 type Out a = a
@@ -26,10 +27,10 @@ renameBounds f ids rn (unzip -> (xs, es)) = (ids', rn', zipWith f xs xs' `zip` m
   where (ids', rn', xs') = renameBinders ids rn xs
 
 
-(renameTerm,                renameAlts,                renameValue,                renameValue')                = mkRename (\f rn (I e) -> I (f rn e))
+(renameTerm,                renameAlts,                renameValue,                renameValue')                = mkRename (\f rn (Identity e) -> Identity (f rn e))
 (renameFVedTerm,            renameFVedAlts,            renameFVedValue,            renameFVedValue')            = mkRename (\f rn (FVed fvs e) -> FVed (renameFreeVars rn fvs) (f rn e))
 (renameTaggedTerm,          renameTaggedAlts,          renameTaggedValue,          renameTaggedValue')          = mkRename (\f rn (Tagged tg e) -> Tagged tg (f rn e))
-(renameTaggedSizedFVedTerm, renameTaggedSizedFVedAlts, renameTaggedSizedFVedValue, renameTaggedSizedFVedValue') = mkRename (\f rn (Comp (Tagged tg (Comp (Sized sz (FVed fvs e))))) -> Comp (Tagged tg (Comp (Sized sz (FVed (renameFreeVars rn fvs) (f rn e))))))
+(renameTaggedSizedFVedTerm, renameTaggedSizedFVedAlts, renameTaggedSizedFVedValue, renameTaggedSizedFVedValue') = mkRename (\f rn (Compose (Tagged tg (Compose (Sized sz (FVed fvs e))))) -> Compose (Tagged tg (Compose (Sized sz (FVed (renameFreeVars rn fvs) (f rn e))))))
 
 {-# INLINE mkRename #-}
 mkRename :: (forall a. (Renaming -> a -> a) -> Renaming -> ann a -> ann a)
@@ -48,7 +49,7 @@ mkRename rec = (term, alternatives, value, value')
       Case e alts -> Case (term ids rn e) (alternatives ids rn alts)
       LetRec xes e -> LetRec (map (second (renameIn (term ids'))) xes') (term ids' rn' e)
         where (ids', rn', xes') = renameBounds (\_ x' -> x') ids rn xes
-    
+
     value ids rn = rec (value' ids) rn
     value' ids rn v = case v of
       Indirect x -> Indirect (rename rn x)
@@ -56,9 +57,9 @@ mkRename rec = (term, alternatives, value, value')
         where (ids', rn', x') = renameBinder ids rn x
       Data dc xs -> Data dc (map (rename rn) xs)
       Literal l -> Literal l
-    
+
     alternatives ids rn = map (alternative ids rn)
-    
+
     alternative ids rn (alt_con, alt_e) = (alt_con', term ids' rn' alt_e)
         where (ids', rn', alt_con') = renameAltCon ids rn alt_con
 

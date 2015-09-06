@@ -3,10 +3,11 @@ module GHC where
 
 import Core.Syntax
 
-import Utilities
 import StaticFlags
+import Utilities
 
 import Control.Exception
+import Data.List (isPrefixOf)
 
 import System.Directory
 import System.Exit

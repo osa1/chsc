@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards, TupleSections,
+             ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Match (match) where
 
@@ -17,15 +18,7 @@ import qualified Data.Set as S
 
 --newtype Match a = Match { unMatch :: Either String a }
 newtype Match a = Match { unMatch :: Maybe a }
-
-instance Functor Match where
-    fmap = liftM
-
-instance Monad Match where
-    return = Match . return
-    mx >>= fxmy = Match $ unMatch mx >>= (unMatch . fxmy)
-    --fail s = Match $ Left s
-    fail s = Match $ fail s
+  deriving (Functor, Applicative, Monad)
 
 guard :: String -> Bool -> Match ()
 guard _   True  = return ()
@@ -212,9 +205,9 @@ matchEnvironment ids bound_eqs free_eqs h_l h_r = matchLoop bound_eqs free_eqs S
     -- In the new world, we record staticness as phantom heap bindings, so this just doesn't figure in at all.
     -- We can account for staticness using the standard generalisation mechanism, and there is no need for the
     -- matcher to have hacks like that (though we still have to be careful about how we match phantoms).
-    
+
     markUsed x' (_, e) used = if isCheap (annee e) then used else S.insert x' used
-    
+
     matchLoop known [] _ _ = return known
     matchLoop known ((x_l, x_r):free_eqs) used_l used_r
        -- Perhaps we have already assumed this equality is true?

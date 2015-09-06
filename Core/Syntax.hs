@@ -1,16 +1,17 @@
-{-# LANGUAGE DeriveAnyClass, DeriveGeneric, FlexibleInstances, PatternGuards,
-             Rank2Types, TypeSynonymInstances, ViewPatterns #-}
+{-# LANGUAGE DeriveAnyClass, Rank2Types, TypeSynonymInstances #-}
 module Core.Syntax where
-
-import Core.Data (DataCon)
 
 import Name
 import StaticFlags
 import Utilities
 
-import Control.DeepSeq ()
+import Control.DeepSeq (NFData)
+import Control.Monad.Identity
+import Data.Copointed
 import Data.List
 import GHC.Generics (Generic)
+
+import Core.Data (DataCon)
 
 type Var = Name
 
@@ -20,10 +21,18 @@ data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | L
 data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var)
             deriving (Eq, Show)
 
+instance NFData AltCon where
+  rnf (DataAlt con vs) = rnf con `seq` rnf (rnfCons vs)
+    where
+      rnfCons [] = ()
+      rnfCons (_ : t) = rnfCons t
+  rnf (LiteralAlt lit) = () -- No NFData for Literal
+  rnf (DefaultAlt mv)  = mv `seq` () -- We use seq here, because GHC's Var is not NFData
+
 -- Note [Case wildcards]
 -- ~~~~~~~~~~~~~~~~~~~~~
 --
--- Simon thought that I should use the variable in the DefaultAlt to agressively rewrite occurences of a scrutinised variable.
+-- Simon thought that Identity should use the variable in the DefaultAlt to agressively rewrite occurences of a scrutinised variable.
 -- The motivation is that this lets us do more inlining above the case. For example, take this code fragment from foldl':
 --
 --   let n' = c n y
@@ -35,7 +44,7 @@ data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var
 --   in case n' of wild -> foldl c wild ys
 --
 -- This lets us potentially inline n' directly into the scrutinee position (operationally, this prevent creation of a thunk for n').
--- However, I don't think that this particular form of improving linearity helps the supercompiler. We only want to inline n' in
+-- However, Identity don't think that this particular form of improving linearity helps the supercompiler. We only want to inline n' in
 -- somewhere if it meets some interesting context, with which it can cancel. But if we are creating an update frame for n' at all,
 -- it is *probably* because we had no information about what it evaluated to.
 --
@@ -55,15 +64,23 @@ data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var
 --
 -- Since we now know the form of n', everything works out nicely.
 --
--- Conclusion: I don't think rewriting to use the case wildcard buys us anything at all.
+-- Conclusion: Identity don't think rewriting to use the case wildcard buys us anything at all.
 
-data Literal = Int Integer | Char Char
-             deriving (Eq, Show)
+data Literal
+  = Int Integer | Char Char
+  deriving (Eq, Show)
 
 type Term = Identity (TermF Identity)
+
 type TaggedTerm = Tagged (TermF Tagged)
-data TermF ann = Var Var | Value (ValueF ann) | App (ann (TermF ann)) Var | PrimOp PrimOp [ann (TermF ann)] | Case (ann (TermF ann)) [AltF ann] | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
-               deriving (Eq, Show)
+
+data TermF ann
+  = Var Var
+  | Value (ValueF ann)
+  | App (ann (TermF ann)) Var
+  | PrimOp PrimOp [ann (TermF ann)]
+  | Case (ann (TermF ann)) [AltF ann]
+  | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
 
 type Alt = AltF Identity
 type TaggedAlt = AltF Tagged
@@ -71,31 +88,12 @@ type AltF ann = (AltCon, ann (TermF ann))
 
 type Value = ValueF Identity
 type TaggedValue = ValueF Tagged
-data ValueF ann = Indirect Var | Lambda Var (ann (TermF ann)) | Data DataCon [Var] | Literal Literal -- TODO: add PAPs as well? Would avoid duplicating function bodies too eagerly.
-                deriving (Eq, Show)
 
-instance NFData AltCon where
-    rnf (DataAlt a b) = rnf a `seq` rnf b
-    rnf (LiteralAlt a) = rnf a
-    rnf (DefaultAlt a) = rnf a
-
-instance NFData Literal where
-    rnf (Int a) = rnf a
-    rnf (Char a) = rnf a
-
-instance NFData1 ann => NFData (TermF ann) where
-    rnf (Var a) = rnf a
-    rnf (Value a) = rnf a
-    rnf (App a b) = rnf a `seq` rnf b
-    rnf (PrimOp a b) = rnf a `seq` rnf b
-    rnf (Case a b) = rnf a `seq` rnf b
-    rnf (LetRec a b) = rnf a `seq` rnf b
-
-instance NFData1 ann => NFData (ValueF ann) where
-    rnf (Indirect a) = rnf a
-    rnf (Lambda a b) = rnf a `seq` rnf b
-    rnf (Data a b) = rnf a `seq` rnf b
-    rnf (Literal a) = rnf a
+data ValueF ann
+  = Indirect Var
+  | Lambda Var (ann (TermF ann))
+  | Data DataCon [Var]
+  | Literal Literal -- TODO: add PAPs as well? Would avoid duplicating function bodies too eagerly.
 
 instance Pretty PrimOp where
     pPrint Add           = text "(+)"
@@ -172,28 +170,28 @@ altConBinders (DataAlt _ xs)    = xs
 altConBinders (LiteralAlt _)    = []
 altConBinders (DefaultAlt mb_x) = maybeToList mb_x
 
-termToValue :: Copointed ann => ann (TermF ann) -> Maybe (ann (ValueF ann))
-termToValue e = case extract e of Value v -> Just (fmap (const v) e); _ -> Nothing
+termToValue :: (Copointed ann, Functor ann) => ann (TermF ann) -> Maybe (ann (ValueF ann))
+termToValue e = case copoint e of Value v -> Just (fmap (const v) e); _ -> Nothing
 
 termIsValue :: Copointed ann => ann (TermF ann) -> Bool
-termIsValue = isValue . extract
+termIsValue = isValue . copoint
 
 isValue :: TermF ann -> Bool
 isValue (Value _) = True
 isValue _         = False
 
 termIsCheap :: Copointed ann => ann (TermF ann) -> Bool
-termIsCheap = isCheap . extract
+termIsCheap = isCheap . copoint
 
 isCheap :: Copointed ann => TermF ann -> Bool
-isCheap _ | cALL_BY_NAME = True -- A cunning hack. I think this is all that should be required...
+isCheap _ | cALL_BY_NAME = True -- A cunning hack. Identity think this is all that should be required...
 isCheap (Var _)     = True
 isCheap (Value _)   = True
-isCheap (Case e []) = isCheap (extract e) -- NB: important for pushing down let-bound applications of ``error''
+isCheap (Case e []) = isCheap (copoint e) -- NB: important for pushing down let-bound applications of ``error''
 isCheap _           = False
 
 termToVar :: Copointed ann => ann (TermF ann) -> Maybe Var
-termToVar e = case extract e of
+termToVar e = case copoint e of
     Value (Indirect x) -> Just x
     Var x              -> Just x
     _                  -> Nothing
@@ -208,19 +206,19 @@ class Symantics ann where
     letRec :: [(Var, ann (TermF ann))] -> ann (TermF ann) -> ann (TermF ann)
 
 instance Symantics Identity where
-    var = I . Var
-    value = I . Value
-    app e = I . App e
-    primOp pop es = I (PrimOp pop es)
-    case_ e = I . Case e
-    letRec xes e = I $ LetRec xes e
+    var = Identity . Var
+    value = Identity . Value
+    app e = Identity . App e
+    primOp pop es = Identity (PrimOp pop es)
+    case_ e = Identity . Case e
+    letRec xes e = Identity $ LetRec xes e
 
 
 reify :: (forall ann. Symantics ann => ann (TermF ann)) -> Term
 reify x = x
 
 reflect :: Term -> (forall ann. Symantics ann => ann (TermF ann))
-reflect (I e) = case e of
+reflect (Identity e) = case e of
     Var x              -> var x
     Value (Indirect x) -> value (Indirect x)
     Value (Lambda x e) -> value (Lambda x (reflect e))
@@ -258,11 +256,11 @@ strictLet :: Symantics ann => Var -> ann (TermF ann) -> ann (TermF ann) -> ann (
 strictLet x e1 e2 = case_ e1 [(DefaultAlt (Just x), e2)]
 
 collectLambdas :: Term -> ([Var], Term)
-collectLambdas (I (Value (Lambda x e))) = first (x:) $ collectLambdas e
+collectLambdas (Identity (Value (Lambda x e))) = first (x:) $ collectLambdas e
 collectLambdas e                        = ([], e)
 
 freshFloatVar :: IdSupply -> String -> Term -> (IdSupply, Maybe (Name, Term), Name)
-freshFloatVar ids _ (I (Var x)) = (ids,  Nothing,     x)
+freshFloatVar ids _ (Identity (Var x)) = (ids,  Nothing,     x)
 freshFloatVar ids s e           = (ids', Just (y, e), y)
   where (ids', y) = freshName ids s
 

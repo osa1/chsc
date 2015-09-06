@@ -1,24 +1,57 @@
-{-# LANGUAGE Rank2Types, TypeOperators, FlexibleInstances, DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable, DeriveFunctor, DeriveTraversable,
+             FlexibleInstances, Rank2Types, TypeOperators #-}
 module Core.FreeVars where
 
 import Core.Syntax
 
 import Utilities
 
-import qualified Data.Set as S
+import Control.Monad.Identity
+import Data.Copointed
 import qualified Data.Foldable as Foldable
+import Data.Functor.Classes
+import Data.Functor.Compose
+import qualified Data.Set as S
 import qualified Data.Traversable as Traversable
-
+import GHC.Generics (Generic)
 
 type FreeVars = S.Set Var
 type BoundVars = S.Set Var
 
+(termVarFreeVars',
+ termFreeVars,
+ termFreeVars',
+ altsFreeVars,
+ valueFreeVars,
+ valueFreeVars') = mkFreeVars (\f (Identity e) -> f e)
 
-(termVarFreeVars',            termFreeVars,                termFreeVars',                altsFreeVars,                valueFreeVars,                valueFreeVars')                = mkFreeVars (\f (I e) -> f e)
-(fvedTermVarFreeVars',        fvedTermFreeVars,            fvedTermFreeVars',            fvedAltsFreeVars,            fvedValueFreeVars,            fvedValueFreeVars')            = mkFreeVars (\_ (FVed fvs _) -> fvs)
-(sizedFVedVarFreeVars',       sizedFVedTermFreeVars,       sizedFVedTermFreeVars',       sizedFVedAltsFreeVars,       sizedFVedValueFreeVars,       sizedFVedValueFreeVars')       = mkFreeVars (\_ (Comp (Sized _ (FVed fvs _))) -> fvs)
-(taggedTermVarFreeVars',      taggedTermFreeVars,          taggedTermFreeVars',          taggedAltsFreeVars,          taggedValueFreeVars,          taggedValueFreeVars')          = mkFreeVars (\f (Tagged _ e) -> f e)
-(taggedSizedFVedVarFreeVars', taggedSizedFVedTermFreeVars, taggedSizedFVedTermFreeVars', taggedSizedFVedAltsFreeVars, taggedSizedFVedValueFreeVars, taggedSizedFVedValueFreeVars') = mkFreeVars (\_ (Comp (Tagged _ (Comp (Sized _ (FVed fvs _))))) -> fvs)
+(fvedTermVarFreeVars',
+ fvedTermFreeVars,
+ fvedTermFreeVars',
+ fvedAltsFreeVars,
+ fvedValueFreeVars,
+ fvedValueFreeVars') = mkFreeVars (\_ (FVed fvs _) -> fvs)
+
+(sizedFVedVarFreeVars',
+ sizedFVedTermFreeVars,
+ sizedFVedTermFreeVars',
+ sizedFVedAltsFreeVars,
+ sizedFVedValueFreeVars,
+ sizedFVedValueFreeVars') = mkFreeVars (\_ (Compose (Sized _ (FVed fvs _))) -> fvs)
+
+(taggedTermVarFreeVars',
+ taggedTermFreeVars,
+ taggedTermFreeVars',
+ taggedAltsFreeVars,
+ taggedValueFreeVars,
+ taggedValueFreeVars') = mkFreeVars (\f (Tagged _ e) -> f e)
+
+(taggedSizedFVedVarFreeVars',
+ taggedSizedFVedTermFreeVars,
+ taggedSizedFVedTermFreeVars',
+ taggedSizedFVedAltsFreeVars,
+ taggedSizedFVedValueFreeVars,
+ taggedSizedFVedValueFreeVars') = mkFreeVars (\_ (Compose (Tagged _ (Compose (Sized _ (FVed fvs _))))) -> fvs)
 
 {-# INLINE mkFreeVars #-}
 mkFreeVars :: (forall a. (a -> FreeVars) -> ann a -> FreeVars)
@@ -31,7 +64,7 @@ mkFreeVars :: (forall a. (a -> FreeVars) -> ann a -> FreeVars)
 mkFreeVars rec = (var', term, term', alternatives, value, value')
   where
     var' = S.singleton
-    
+
     term = rec term'
     term' (Var x)        = S.singleton x
     term' (Value v)      = value' v
@@ -40,15 +73,15 @@ mkFreeVars rec = (var', term, term', alternatives, value, value')
     term' (Case e alts)  = term e `S.union` alternatives alts
     term' (LetRec xes e) = deleteList xs $ S.unions (map term es) `S.union` term e
       where (xs, es) = unzip xes
-    
+
     value = rec value'
     value' (Indirect x) = S.singleton x
     value' (Lambda x e) = S.delete x $ term e
     value' (Data _ xs)  = S.fromList xs
     value' (Literal _)  = S.empty
-    
+
     alternatives = S.unions . map alternative
-    
+
     alternative (altcon, e) = altConFreeVars altcon $ term e
 
 altConOpenFreeVars :: AltCon -> (BoundVars, FreeVars) -> (BoundVars, FreeVars)
@@ -66,7 +99,7 @@ data FVed a = FVed { freeVars :: !FreeVars, fvee :: !a }
             deriving (Functor, Foldable.Foldable, Traversable.Traversable)
 
 instance Copointed FVed where
-    extract = fvee
+    copoint = fvee
 
 instance Show1 FVed where
     showsPrec1 prec (FVed fvs x) = showParen (prec >= appPrec) (showString "FVed" . showsPrec appPrec fvs . showsPrec appPrec x)
@@ -76,9 +109,6 @@ instance Eq1 FVed where
 
 instance Ord1 FVed where
     compare1 (FVed fvs1 x1) (FVed fvs2 x2) = (x1, fvs1) `compare` (x2, fvs2)
-
-instance NFData1 FVed where
-    rnf1 (FVed a b) = rnf a `seq` rnf b
 
 instance Pretty1 FVed where
     pPrintPrec1 level prec (FVed _ x) = pPrintPrec level prec x

@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternGuards, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards #-}
 module Renaming (
     Renaming(..),
     emptyRenaming, mkRenaming, mkIdentityRenaming,
@@ -11,14 +11,13 @@ import Name
 import Utilities
 
 import qualified Data.Map as M
-
+import Data.Traversable (mapAccumL)
 
 type In a = a
 type Out a = a
 
-
 newtype Renaming = Renaming { unRenaming :: M.Map (In Name) (Out Name) }
-                 deriving (Show, NFData)
+  deriving (Show, NFData)
 
 instance Pretty Renaming where
     pPrintPrec level _ rn = braces $ vcat [ pPrintPrec level 0 x <+> text "|->" <+> pPrintPrec level 0 x'
@@ -58,6 +57,7 @@ renameBinder ids rn n = (ids', insertRenaming n n' rn, n')
   where (ids', n') = freshName ids (name_string n)
 
 renameBinders :: IdSupply -> Renaming -> [In Name] -> (IdSupply, Renaming, [Out Name])
-renameBinders ids rn = reassociate . mapAccumL ((associate .) . uncurry renameBinder) (ids, rn)
+renameBinders ids rn =
+    reassociate . mapAccumL ((associate .) . uncurry renameBinder) (ids, rn)
   where associate   (ids, rn, n)    = ((ids, rn), n)
         reassociate ((ids, rn), ns) = (ids, rn, ns)

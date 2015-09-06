@@ -1,4 +1,5 @@
-{-# LANGUAGE ViewPatterns, TupleSections, PatternGuards, BangPatterns, RankNTypes #-}
+{-# LANGUAGE BangPatterns, DeriveFunctor, PatternGuards, RankNTypes,
+             TupleSections, ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Supercompile.Drive (SCStats(..), supercompile) where
 
@@ -19,18 +20,20 @@ import Evaluator.Residualise
 import Evaluator.Syntax
 
 import Termination.Extras
+import Termination.Generaliser
 import Termination.TagBag
 import Termination.TagGraph
 import Termination.TagSet
 import Termination.Terminate
-import Termination.Generaliser
 
 import Name
 import Renaming
 import StaticFlags
 import Utilities
 
+import Control.Monad.Identity
 import qualified Data.Foldable as Foldable
+import Data.List (mapAccumL, partition, sortBy)
 import qualified Data.Map as M
 import Data.Monoid
 import Data.Ord
@@ -58,7 +61,7 @@ wQO = wqo2
 
 data SCStats = SCStats {
     stat_reduce_stops :: !Int,
-    stat_sc_stops :: !Int
+    stat_sc_stops     :: !Int
   }
 
 instance NFData SCStats where
@@ -79,7 +82,7 @@ supercompile :: Term -> (SCStats, Term)
 supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty state
   where input_fvs = annedTermFreeVars anned_e
         state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (M.fromDistinctAscList anned_h_kvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toAscList input_fvs, anned_e))
-        
+
         (tag_ids, anned_h_kvs) = mapAccumL (\tag_ids x' -> let (tag_ids', i) = stepIdSupply tag_ids in (tag_ids', (x', environmentallyBound (mkTag (hashedId i))))) tagIdSupply (S.toList input_fvs)
         anned_e = toAnnedTerm tag_ids e
 
@@ -119,7 +122,7 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
                                           (h_dead, state')
   where
     state' = (deeds2, Heap h' ids, k', in_e)
-    
+
     -- We have to use stateAllFreeVars here rather than stateFreeVars because in order to safely prune the live stack we need
     -- variables bound by k to be part of the live set if they occur within in_e or the rest of the k
     live0 = stateAllFreeVars (deeds0, Heap M.empty ids, k, in_e)
@@ -127,26 +130,26 @@ gc _state@(deeds0, Heap h ids, k, in_e) = assertRender ("gc", stateUncoveredVars
     -- Collecting dead update frames doesn't make any new heap bindings dead since they don't refer to anything
     (deeds2, k') | mATCH_REDUCED = (deeds1, k) -- FIXME: Can't deal with this any longer in the Brave New World of using reduction+GC to prove deadness
                  | otherwise     = pruneLiveStack deeds1 k live1
-    
+
     inlineLiveHeap :: Deeds -> PureHeap -> FreeVars -> (Deeds, PureHeap, PureHeap, FreeVars)
     inlineLiveHeap deeds h live = (deeds `releasePureHeapDeeds` h_dead, h_dead, h_live, live')
       where
         (h_dead, h_live, live') = heap_worker h M.empty live
-        
+
         -- This is just like Split.transitiveInline, but simpler since it never has to worry about running out of deeds:
         heap_worker :: PureHeap -> PureHeap -> FreeVars -> (PureHeap, PureHeap, FreeVars)
         heap_worker h_pending h_output live
           = if live == live'
             then (h_pending', h_output', live')
             else heap_worker h_pending' h_output' live'
-          where 
+          where
             (h_pending_kvs', h_output', live') = M.foldrWithKey consider_inlining ([], h_output, live) h_pending
             h_pending' = M.fromDistinctAscList h_pending_kvs'
-        
+
             consider_inlining x' hb (h_pending_kvs, h_output, live)
               | x' `S.member` live = (h_pending_kvs,            M.insert x' hb h_output, live `S.union` heapBindingFreeVars hb)
               | otherwise          = ((x', hb) : h_pending_kvs, h_output,                live)
-    
+
     pruneLiveStack :: Deeds -> Stack -> FreeVars -> (Deeds, Stack)
     pruneLiveStack deeds k live = (deeds `releaseStackDeeds` k_dead, k_live)
       where (k_live, k_dead) = partition (\kf -> case tagee kf of Update x' -> x' `S.member` live; _ -> True) k
@@ -204,10 +207,10 @@ speculate speculated (stats, (deeds, Heap h ids, k, in_e)) = (M.keysSet h, (stat
     (h_non_values_unspeculated, h_non_values_speculated) = (h_non_values `exclude` speculated, h_non_values `restrict` speculated)
 
     (stats', deeds', h_speculated_ok, h_speculated_failure, ids') = runSpecM (speculateManyMap (mkHistory (extra wQO)) h_non_values_unspeculated) (stats, deeds, h_values, M.empty, ids)
-    
+
     speculateManyMap hist = speculateMany hist . concatMap M.toList . topologicalSort heapBindingFreeVars
     speculateMany hist = mapM_ (speculateOne hist)
-    
+
     speculateOne :: History (State, SpecM ()) (Generaliser, SpecM ()) -> (Out Var, HeapBinding) -> SpecM ()
     speculateOne hist (x', hb)
       | HB InternallyBound (Right in_e) <- hb
@@ -227,13 +230,15 @@ speculate speculated (stats, (deeds, Heap h ids, k, in_e)) = (M.keysSet h, (stat
           modifySpecState go >>= id
 
 type SpecState = (SCStats, Deeds, PureHeap, PureHeap, IdSupply)
-newtype SpecM a = SpecM { unSpecM :: SpecState -> (SpecState -> a -> SpecState) -> SpecState }
 
-instance Functor SpecM where
-    fmap = liftM
+newtype SpecM a = SpecM { unSpecM :: SpecState -> (SpecState -> a -> SpecState) -> SpecState }
+  deriving (Functor)
+
+instance Applicative SpecM where
+    pure x = SpecM $ \s k -> k s x
+    f <*> a = do f' <- f; a' <- a; return (f' a')
 
 instance Monad SpecM where
-    return x = SpecM $ \s k -> k s x
     mx >>= fxmy = SpecM $ \s k -> unSpecM mx s (\s x -> unSpecM (fxmy x) s k)
 
 modifySpecState :: (SpecState -> (SpecState, a)) -> SpecM a
@@ -337,7 +342,7 @@ partitionFulfilments :: (a -> fulfilment -> Maybe b)  -- ^ Decide whether a fulf
                      -> ([fulfilment], [fulfilment])  -- ^ Fulfilments that should be bound and those that should continue to float, respectively
 partitionFulfilments p combine = go
   where go x fs -- | traceRender ("partitionFulfilments", x, map (fun . fst) fs) False = undefined
-                | null fs_now' = ([], fs) 
+                | null fs_now' = ([], fs)
                 | otherwise    = first (fs_now' ++) $ go (combine xs') fs'
                 where (unzip -> (fs_now', xs'), fs') = extractJusts (\fulfilment -> fmap (fulfilment,) $ p x fulfilment) fs
 
@@ -375,7 +380,7 @@ freshHName :: ScpM Var
 freshHName = ScpM $ \_e s k -> k (expectHead "freshHName" (names s)) (s { names = tail (names s) })
 
 fulfilmentPromise :: Fulfilment -> Maybe (Promise Identity)
-fulfilmentPromise (P fun abstracted (Just meaning), _) = Just (P fun abstracted (I meaning))
+fulfilmentPromise (P fun abstracted (Just meaning), _) = Just (P fun abstracted (Identity meaning))
 fulfilmentPromise _                                    = Nothing
 
 getPromises :: ScpM [Promise Identity]
@@ -404,16 +409,16 @@ promise p opt = ScpM $ \e s k -> {- traceRender ("promise", fun p, abstracted p)
           abstracted'_list = S.toList abstracted'_set
       ScpM $ \_e s k -> let fs' | abstracted_set == abstracted'_set || not rEFINE_FULFILMENT_FVS
                                  -- If the free variables are totally unchanged, there is nothing to be gained from clever fiddling
-                                = (P { fun = fun p, abstracted = abstracted p, meaning = Just (unI (meaning p)) }, lambdas (abstracted p) e') : fulfilments s
+                                = (P { fun = fun p, abstracted = abstracted p, meaning = Just (runIdentity (meaning p)) }, lambdas (abstracted p) e') : fulfilments s
                                 | otherwise
                                  -- If the free variable set has got smaller, we can fulfill our old promise with a simple wrapper around a new one with fewer free variables
                                 , let fun' = (fun p) { name_string = name_string (fun p) ++ "'" }
                                 = (P { fun = fun p, abstracted = abstracted p, meaning = Nothing }, lambdas (abstracted p) (fvedTerm (Var fun') `apps` abstracted'_list)) :
-                                  (P { fun = fun', abstracted = abstracted'_list, meaning = Just (unI (meaning p)) }, lambdas abstracted'_list e') : fulfilments s
+                                  (P { fun = fun', abstracted = abstracted'_list, meaning = Just (runIdentity (meaning p)) }, lambdas abstracted'_list e') : fulfilments s
                         in k () (s { fulfilments = fs' })
-      
-      fmap (((abstracted_set `S.union` stateLetBounders (unI (meaning p))) `S.union`) . S.fromList) getPromiseNames >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
-      
+
+      fmap (((abstracted_set `S.union` stateLetBounders (runIdentity (meaning p))) `S.union`) . S.fromList) getPromiseNames >>= \fvs -> assertRender ("sc: FVs", fun p, fvs' S.\\ fvs, fvs, e') (fvs' `S.isSubsetOf` fvs) $ return ()
+
       return (a, fun p `varApps` abstracted p)
 
 
@@ -434,13 +439,17 @@ data ScpState = ScpState {
     stats       :: SCStats
   }
 
-newtype ScpM a = ScpM { unScpM :: ScpEnv -> ScpState -> (a -> ScpState -> (SCStats, Out FVedTerm)) -> (SCStats, Out FVedTerm) }
+newtype ScpM a =
+    ScpM { unScpM :: ScpEnv -> ScpState ->
+                     (a -> ScpState -> (SCStats, Out FVedTerm)) ->
+                     (SCStats, Out FVedTerm) }
+  deriving (Functor)
 
-instance Functor ScpM where
-    fmap = liftM
+instance Applicative ScpM where
+    pure x = ScpM $ \_e s k -> k x s
+    f <*> a = do f' <- f; a' <- a; return (f' a')
 
 instance Monad ScpM where
-    return x = ScpM $ \_e s k -> k x s
     (!mx) >>= fxmy = ScpM $ \e s k -> unScpM mx e s (\x s -> unScpM (fxmy x) e s k)
 
 runScpM :: ScpM (Out FVedTerm) -> (SCStats, Out FVedTerm)
@@ -457,7 +466,7 @@ catchScpM f_try f_abort = ScpM $ \e s k -> unScpM (f_try (\c -> ScpM $ \e' s' _k
                           then s
                           else let not_completed = S.fromList (map fun (promises e')) S.\\ S.fromList (map fun (promises e))
                                    (fss_candidates, _fss_common) = splitByReverse (fulfilmentStack e) (fulfilmentStack e')
-                                   
+
                                    -- Since we are rolling back we need to float as many of the fulfilments created in between here and the rollback point
                                    -- upwards. This means that we don't lose the work that we already did to supercompile those bindings.
                                    --
@@ -501,14 +510,14 @@ memo opt speculated state0 = do
                                      (state2', state4)
               where h_dead_promoted = M.mapMaybe (\hb -> guard (howBound hb /= InternallyBound) >> return (hb { howBound = InternallyBound })) h_junk
                     state4 = case state0 of (deeds, Heap h ids, k, in_qa) -> (deeds, Heap (h_dead_promoted `M.union` h) ids, k, in_qa)
-    
+
     ps <- getPromises
     case [ (p, (releaseStateDeed state0, fun p `varApps` tb_dynamic_vs))
          | p <- ps
          , Just rn_lr <- [(\res -> if isNothing res then traceRender ("no match:", fun p) res else res) $
-                           match (unI (meaning p)) state3]
+                           match (runIdentity (meaning p)) state3]
           -- NB: because I can trim reduce the set of things abstracted over above, it's OK if the renaming derived from the meanings renames vars that aren't in the abstracted list, but NOT vice-versa
-         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint (fun p) $$ pPrintFullState (unI (meaning p)) $$ pPrint rn_lr $$ pPrintFullState state3) (S.null bad_renames) True
+         , let bad_renames = S.fromList (abstracted p) S.\\ M.keysSet (unRenaming rn_lr) in assertRender (text "Renaming was inexhaustive:" <+> pPrint bad_renames $$ pPrint (fun p) $$ pPrintFullState (runIdentity (meaning p)) $$ pPrint rn_lr $$ pPrintFullState state3) (S.null bad_renames) True
          , let rn_fvs = map (safeRename ("tieback: FVs for " ++ render (pPrint (fun p) $$ text "Us:" $$ pPrint state3 $$ text "Them:" $$ pPrint (meaning p)))
                                         rn_lr) -- NB: If tb contains a dead PureHeap binding (hopefully impossible) then it may have a free variable that I can't rename, so "rename" will cause an error. Not observed in practice yet.
                tb_dynamic_vs = rn_fvs (abstracted p)
@@ -518,10 +527,10 @@ memo opt speculated state0 = do
         return res
       [] -> {- traceRender ("new drive", pPrintFullState state3) $ -} do
         let vs = stateLambdaBounders state3
-        
+
         -- NB: promises are lexically scoped because they may refer to FVs
         x <- freshHName
-        promise P { fun = x, abstracted = S.toList vs, meaning = I state3 } $
+        promise P { fun = x, abstracted = S.toList vs, meaning = Identity state3 } $
           do
             traceRenderScpM (">sc", x, pPrintFullState state4)
             -- FIXME: this is the site of the Dreadful Hack that makes it safe to match on reduced terms yet *drive* unreduced ones

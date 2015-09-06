@@ -1,18 +1,18 @@
 {-# LANGUAGE TupleSections #-}
 module Core.Prettify (prettify) where
 
-import Core.FreeVars
-import Core.Renaming
-import Core.Syntax
-
 import Renaming
 import Utilities
 
 import Algebra.Lattice
 
+import Data.List (partition)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
+import Core.FreeVars
+import Core.Renaming
+import Core.Syntax
 
 data Occurs = Once | Many
             deriving (Eq)
@@ -51,7 +51,7 @@ prettifyTerm' ids inline (rn, e) = case e of
             (es_occurs, es') = unzip $ map (\in_e -> prettifyTerm ids' inline' in_e) in_es
             (e_occurs, e') = prettifyTerm ids' inline' (rn', e)
             occurs' = e_occurs `join` joins es_occurs
-            
+
             -- Inline those bindings that occurred syntactically exactly once (or were dead):
             (xes'_inline, xes'_leave) = partition (\(x', _e') -> maybe True (== Once) (x' `M.lookup` occurs')) (xs' `zip` es')
 

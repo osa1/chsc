@@ -41,6 +41,9 @@ instance Pretty Name where
               | isAlphaNum c || c `elem` ['_', '\''] = [c]
               | otherwise                            = 'z' : show (ord c)
 
+instance NFData Name where
+  rnf (Name str id) = rnf str `seq` rnf id
+
 name :: String -> Name
 name s = Name s Nothing
 
