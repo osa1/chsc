@@ -13,7 +13,7 @@ import StaticFlags
 import Utilities
 
 import Data.Char (toLower)
-import Data.List (find, intercalate, isPrefixOf, partition)
+import Data.List (find, isPrefixOf, partition)
 import qualified Data.Set as S
 
 import System.Directory
@@ -42,7 +42,7 @@ main = do
 
 test :: Ways -> [FilePath] -> IO ()
 test ways files = do
-    putStrLn $ intercalate " & "
+    putStrLn $ intercalateCols cOL_LEN " & "
       ["Filename", "SC time", "Reduce-stops", "SC-stops",
        "Compile time", "Run time", "Heap size", "Term size"] ++ " \\\\"
     test_errors <-
@@ -155,7 +155,7 @@ showRaw
      -- ^ Benchmark result
   -> String
 showRaw benchmark mb_res =
-    intercalate " & " (benchmark:fields) ++ " \\\\"
+    intercalateCols cOL_LEN " & " (benchmark:fields) ++ " \\\\"
   where
     fields =
       case mb_res of
@@ -169,7 +169,7 @@ showRaw benchmark mb_res =
 
 showComparison
   :: String -> Maybe ((GHCStats, Size, Maybe a), (GHCStats, Int, Maybe (Seconds, SCStats))) -> String
-showComparison benchmark mb_res = intercalate " & " (benchmark:fields) ++ " \\\\"
+showComparison benchmark mb_res = intercalateCols cOL_LEN " & " (benchmark:fields) ++ " \\\\"
   where
     fields =
       case mb_res of

@@ -8,7 +8,6 @@ import System.Environment
 import System.IO.Unsafe
 import System.Process
 
-
 {-# NOINLINE aRGS #-}
 aRGS :: [String]
 aRGS = unsafePerformIO getArgs
@@ -32,6 +31,8 @@ nO_OPTIMISATIONS = "-O0" `elem` aRGS
 gHC_OPTIONS :: [String]
 gHC_OPTIONS = [opt | arg <- aRGS, Just ('=':opt) <- [stripPrefix "--ghc-option" arg]]
 
+cOL_LEN :: Int
+cOL_LEN = maybe 12 read $ listToMaybe $ mapMaybe (stripPrefix "--col-len=") aRGS
 
 aSSERTIONS :: Bool
 aSSERTIONS = not $ "--no-assertions" `elem` aRGS

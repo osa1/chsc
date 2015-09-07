@@ -511,10 +511,6 @@ safeHead (x:_) = Just x
 expectHead :: String -> [a] -> a
 expectHead s = expectJust s . safeHead
 
-uncons :: [a] -> Maybe (a, [a])
-uncons []     = Nothing
-uncons (x:xs) = Just (x, xs)
-
 listSelectors :: [[a] -> a]
 listSelectors = iterate (\f xs -> f (tail xs)) head
 
@@ -625,3 +621,10 @@ f1 <.> f2 = fmap f1 . f2
 
 instance Pretty1 Identity where
   pPrintPrec1 level prec (Identity x) = pPrintPrec level prec x
+
+intercalateCols :: Int -> String -> [String] -> String
+intercalateCols _ _ [] = ""
+intercalateCols r _ [s] =
+    s ++ replicate (r - length s) ' '
+intercalateCols r sep (s0 : s1 : ss) =
+    s0 ++ replicate (r - length s0) ' ' ++ sep ++ intercalateCols r sep (s1 : ss)
