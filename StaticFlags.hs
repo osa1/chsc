@@ -49,14 +49,22 @@ dEEDS :: Bool
 dEEDS = "--deeds" `elem` aRGS
 
 parseEnum :: String -> a -> [(String, a)] -> a
-parseEnum prefix def opts = fromMaybe def $ listToMaybe [parse opt | arg <- aRGS, Just ('=':opt) <- [stripPrefix prefix arg]]
-  where parse = fromJust . flip lookup opts . map toLower
+parseEnum prefix def opts =
+    fromMaybe def $ listToMaybe [ parse opt | arg <- aRGS
+                                            , Just ('=':opt) <- [stripPrefix prefix arg] ]
+  where
+    parse = fromJust . flip lookup opts . map toLower
 
-data DeedsPolicy = FCFS | Proportional
-                 deriving (Read)
+data DeedsPolicy
+  = FCFS | Proportional
+  deriving (Read)
 
 dEEDS_POLICY :: DeedsPolicy
-dEEDS_POLICY = parseEnum "--deeds-policy" Proportional [("fcfs", FCFS), ("proportional", Proportional)]
+dEEDS_POLICY =
+    parseEnum "--deeds-policy" Proportional
+      [ ("fcfs", FCFS)
+      , ("proportional", Proportional)
+      ]
 
 data TagBagType = TBT { tagBagPairwiseGrowth :: Bool }
                 deriving (Show)
@@ -65,7 +73,13 @@ data TagCollectionType = TagBag TagBagType | TagGraph | TagSet
                    deriving (Show)
 
 tAG_COLLECTION :: TagCollectionType
-tAG_COLLECTION = parseEnum "--tag-collection" (TagBag (TBT False)) [("bags", TagBag (TBT False)), ("bags-strong", TagBag (TBT True)), ("graphs", TagGraph), ("sets", TagSet)]
+tAG_COLLECTION =
+    parseEnum "--tag-collection" (TagBag (TBT False))
+      [ ("bags", TagBag (TBT False))
+      , ("bags-strong", TagBag (TBT True))
+      , ("graphs", TagGraph)
+      , ("sets", TagSet)
+      ]
 
 pARTITIONED_REFINEMENT :: Bool
 pARTITIONED_REFINEMENT = "--partitioned-refinement" `elem` aRGS
@@ -76,11 +90,21 @@ sUB_GRAPHS = "--sub-graphs" `elem` aRGS
 data GeneralisationType = NoGeneralisation | AllEligible | DependencyOrder Bool | StackFirst
 
 gENERALISATION :: GeneralisationType
-gENERALISATION = parseEnum "--generalisation" StackFirst [("none", NoGeneralisation), ("all-eligible", AllEligible), ("first-reachable", DependencyOrder True), ("last-reachable", DependencyOrder False), ("stack-first", StackFirst)]
+gENERALISATION =
+    parseEnum "--generalisation" StackFirst
+      [ ("none", NoGeneralisation)
+      , ("all-eligible", AllEligible)
+      , ("first-reachable", DependencyOrder True)
+      , ("last-reachable", DependencyOrder False)
+      , ("stack-first", StackFirst)
+      ]
 
 bLOAT_FACTOR :: Int
-bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [stripPrefix "--bloat=" arg]]
- -- NB: need a bloat factor of at least 5 to get append/append fusion to work. The critical point is:
+bLOAT_FACTOR =
+    fromMaybe 10 $ listToMaybe [ read val | arg <- aRGS
+                                          , Just val <- [stripPrefix "--bloat=" arg] ]
+ -- NB: need a bloat factor of at least 5 to get append/append fusion to work.
+ -- The critical point is:
  --
  --  let (++) = ...
  --  in case (case xs of []     -> ys
@@ -88,7 +112,8 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [
  --    []     -> zs
  --    (x:xs) -> x : (xs ++ zs)
  --
- -- We need to duplicate the case continuation into each branch, so at one time we will have:
+ -- We need to duplicate the case continuation into each branch, so at one time
+ -- we will have:
  --  1) Two copies of (++) in the [] branch of the inner case
  --    a) One in the heap
  --    b) One from the stack (from [_] ++ zs)
@@ -97,9 +122,9 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [
  --
  -- Total = 5 copies (due to tiebacks, the residual program will do better than this)
  --
- --
- -- Unfortunately, my implementation doesn't tie back as eagerly as you might like, so we actually peel the loop once and
- -- hence need a bloat factor of 8 here (5 + 3 other case statements derived from (++))
+ -- Unfortunately, my implementation doesn't tie back as eagerly as you might
+ -- like, so we actually peel the loop once and hence need a bloat factor of 8
+ -- here (5 + 3 other case statements derived from (++))
  -- TODO: figure out how to reduce this number.
 
 sPECULATION :: Bool
@@ -148,7 +173,8 @@ mATCH_REDUCED = "--match-reduced" `elem` aRGS
 mATCH_SPECULATION :: Bool
 mATCH_SPECULATION = not $ "--no-match-speculation" `elem` aRGS
 
--- Turning this on is a really bad idea because it tells us how to generalise a *post reduced* term, but
--- we actually need to generalise a *pre-reduced* term. Oops!
+-- Turning this on is a really bad idea because it tells us how to generalise a
+-- *post reduced* term, but we actually need to generalise a *pre-reduced* term.
+-- Oops!
 rEDUCE_BEFORE_TEST :: Bool
 rEDUCE_BEFORE_TEST = "--reduce-before-test" `elem` aRGS

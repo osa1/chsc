@@ -58,10 +58,10 @@ wQO = wqo2
          | otherwise  = wqo1
 
 
-data SCStats = SCStats {
-    stat_reduce_stops :: !Int,
-    stat_sc_stops     :: !Int
-  }
+data SCStats = SCStats
+  { stat_reduce_stops :: !Int
+  , stat_sc_stops     :: !Int
+  } deriving (Show)
 
 instance NFData SCStats where
     rnf (SCStats a b) = rnf a `seq` rnf b
@@ -76,14 +76,25 @@ instance Monoid SCStats where
         stat_sc_stops = stat_sc_stops stats1 + stat_sc_stops stats2
       }
 
-
 supercompile :: Term -> (SCStats, Term)
-supercompile e = traceRender ("all input FVs", input_fvs) $ second (fVedTermToTerm . if pRETTIFY then prettify else id) $ runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty state
-  where input_fvs = annedTermFreeVars anned_e
-        state = normalise ((bLOAT_FACTOR - 1) * annedSize anned_e, Heap (M.fromDistinctAscList anned_h_kvs) reduceIdSupply, [], (mkIdentityRenaming $ S.toAscList input_fvs, anned_e))
+supercompile e =
+    traceRender ("all input FVs", input_fvs) $
+      second (fVedTermToTerm . if pRETTIFY then prettify else id) $
+        runScpM $ liftM snd $ sc (mkHistory (extra wQO)) S.empty state
+  where
+    input_fvs = annedTermFreeVars anned_e
 
-        (tag_ids, anned_h_kvs) = mapAccumL (\tag_ids x' -> let (tag_ids', i) = stepIdSupply tag_ids in (tag_ids', (x', environmentallyBound (mkTag (hashedId i))))) tagIdSupply (S.toList input_fvs)
-        anned_e = toAnnedTerm tag_ids e
+    state = normalise ( (bLOAT_FACTOR - 1) * annedSize anned_e
+                      , Heap (M.fromDistinctAscList anned_h_kvs) reduceIdSupply
+                      , []
+                      , (mkIdentityRenaming $ S.toAscList input_fvs, anned_e) )
+
+    (tag_ids, anned_h_kvs) =
+      mapAccumL (\tag_ids x' -> let (tag_ids', i) = stepIdSupply tag_ids
+                                 in (tag_ids', (x', environmentallyBound (mkTag (hashedId i)))))
+                tagIdSupply (S.toList input_fvs)
+
+    anned_e = toAnnedTerm tag_ids e
 
 --
 -- == Bounded multi-step reduction ==

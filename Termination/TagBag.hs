@@ -5,7 +5,8 @@ module Termination.TagBag
   ) where
 
 import Termination.Generaliser
-import Termination.Terminate
+import Termination.Terminate (Prearrow (..), WQO, nat, natsWeak,
+                              refineCollection, zippable)
 
 import Evaluator.Syntax
 

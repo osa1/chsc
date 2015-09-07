@@ -167,13 +167,15 @@ showRaw benchmark mb_res =
             ++ [show compile_t, show run_t, show heap_size, show term_size]
         Nothing -> ["", "", "", "", "", "", ""]
 
+showComparison
+  :: String -> Maybe ((GHCStats, Size, Maybe a), (GHCStats, Int, Maybe (Seconds, SCStats))) -> String
 showComparison benchmark mb_res = intercalate " & " (benchmark:fields) ++ " \\\\"
   where
     fields =
       case mb_res of
         Just (( GHCStats _before_size before_compile_t before_heap_size before_run_t
               , before_term_size
-              , Nothing ),
+              , _ ),
               ( GHCStats _after_size  after_compile_t  after_heap_size  after_run_t
               , after_term_size
               , Just (after_super_t, after_stats) )

@@ -169,7 +169,7 @@ set (lazy -> WQO prepare embed) =
       \xs ys -> foldrM (\xrepr whys -> fmap (: whys) $ getFirst (foldMap (\yrepr -> First (xrepr `embed` yrepr)) ys)) [] xs
 
 -- | Embedding on finite sequences of things, derived from an ordering on the
--- elemnts.
+-- elements.
 --
 -- Correctness proved by the Finite Sequence Theorem in "Well-Quasi-Ordering,
 -- The Tree Theorem, and Vazsonyi's Conjecture" (Kruskal, 1960).
