@@ -1,4 +1,3 @@
-{-# LANGUAGE ViewPatterns #-}
 module GHC where
 
 import Core.Syntax

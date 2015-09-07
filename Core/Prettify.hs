@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 module Core.Prettify (prettify) where
 
 import Renaming

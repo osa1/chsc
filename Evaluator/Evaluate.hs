@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections, PatternGuards, ViewPatterns #-}
 module Evaluator.Evaluate (normalise, step) where
 
 import Evaluator.Deeds

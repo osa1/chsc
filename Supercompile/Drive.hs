@@ -1,6 +1,6 @@
-{-# LANGUAGE BangPatterns, DeriveFunctor, PatternGuards, RankNTypes,
-             TupleSections, ViewPatterns #-}
+{-# LANGUAGE DeriveFunctor, RankNTypes #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
 module Supercompile.Drive (SCStats(..), supercompile) where
 
 import Supercompile.Match

@@ -18,9 +18,11 @@ executable supercompile
 
     default-language:   Haskell2010
     default-extensions:
+      BangPatterns
       DeriveGeneric
       FlexibleContexts
       StandaloneDeriving
+      TupleSections
       ViewPatterns
 
     build-depends:

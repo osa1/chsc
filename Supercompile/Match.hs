@@ -1,6 +1,6 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, PatternGuards, TupleSections,
-             ViewPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
 module Supercompile.Match (match) where
 
 import Core.Renaming

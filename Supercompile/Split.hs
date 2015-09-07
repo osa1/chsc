@@ -1,8 +1,7 @@
 {-# LANGUAGE DeriveFoldable, DeriveFunctor, DeriveTraversable,
-             FlexibleInstances, GeneralizedNewtypeDeriving,
-             MultiParamTypeClasses, PatternGuards, TupleSections, ViewPatterns
-             #-}
+             GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
 module Supercompile.Split (MonadStatics(..), split, generalise) where
 
 import Evaluator.Deeds

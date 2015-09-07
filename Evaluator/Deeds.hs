@@ -1,9 +1,8 @@
-{-# LANGUAGE BangPatterns, TupleSections, Rank2Types #-}
 module Evaluator.Deeds where
 
+import Data.List
 import StaticFlags
 import Utilities
-import Data.List
 
 import Data.Ord (comparing)
 
@@ -35,7 +34,7 @@ apportion orig_n weighting
     fracs = assertRender (text "apportion: must have at least one non-zero weight") (denominator /= 0) $
             map (\numerator -> fromIntegral numerator / denominator) weighting
       where denominator = fromIntegral (sum weighting)
-    
+
     -- Here is the idea:
     --  1) Do one pass through the list of fractians
     --  2) Start by allocating the floor of the number of "n" that we should allocate to this weight of the fraction
@@ -46,7 +45,7 @@ apportion orig_n weighting
     go (i, n, deserving) frac = ((i + 1, n - whole, (i, remainder) : deserving),
                                  whole + if i `elem` final_deserving_allowed then 1 else 0)
       where (whole, remainder) = properFraction (frac * fromIntegral orig_n)
-    
+
     -- We should prefer to allocate pieces to those bits of the fraction where the error (i.e. the fractional part) is greatest.
     -- We cannot allocate more of these "fixup" pieces than we had "n" left at the end of the first pass.
     final_deserving_allowed = map fst (take remaining (sortBy (comparing (Down . snd)) final_deserving))

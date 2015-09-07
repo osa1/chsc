@@ -1,4 +1,3 @@
-{-# LANGUAGE ViewPatterns #-}
 module Termination.TagGraph (
         embedWithTagGraphs
     ) where

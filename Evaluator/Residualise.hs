@@ -1,5 +1,9 @@
-{-# LANGUAGE ViewPatterns, TupleSections #-}
-module Evaluator.Residualise (residualiseState, pPrintHeap, pPrintFullState, pPrintFullUnnormalisedState) where
+module Evaluator.Residualise
+  ( residualiseState
+  , pPrintHeap
+  , pPrintFullState
+  , pPrintFullUnnormalisedState
+  ) where
 
 import Evaluator.Deeds
 import Evaluator.Syntax

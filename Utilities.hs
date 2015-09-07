@@ -1,8 +1,9 @@
-{-# LANGUAGE CPP, DeriveFoldable, DeriveFunctor, DeriveGeneric,
-             DeriveTraversable, ExistentialQuantification, FlexibleInstances,
-             GeneralizedNewtypeDeriving, IncoherentInstances, PatternGuards,
-             TupleSections, TypeOperators, TypeSynonymInstances #-}
+{-# LANGUAGE DeriveFoldable, DeriveFunctor, DeriveTraversable,
+             ExistentialQuantification, FlexibleInstances,
+             GeneralizedNewtypeDeriving, IncoherentInstances, TypeOperators,
+             TypeSynonymInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module Utilities (
     module IdSupply,
     module Utilities,
@@ -67,21 +68,6 @@ class Functor z => Zippable z where
 
     zipWith_ :: (a -> b -> c) -> z a -> z b -> z c
     zipWith_ f as bs = fmap (uncurry f) (zip_ as bs)
-
-
-#ifdef MIN_VERSION_base
-#if !(MIN_VERSION_base(4, 3, 0))
-
--- These instances are in base-4.3
-
-instance Monad (Either a) where
-    return = Right
-
-    Left l  >>= _    = Left l
-    Right x >>= fxmy = fxmy x
-
-#endif
-#endif
 
 class Pretty1 f where
     pPrintPrec1 :: Pretty a => PrettyLevel -> Rational -> f a -> Doc

@@ -1,4 +1,5 @@
-{-# LANGUAGE Rank2Types, TupleSections, ViewPatterns #-}
+{-# LANGUAGE Rank2Types #-}
+
 module Core.Renaming where
 
 import Renaming

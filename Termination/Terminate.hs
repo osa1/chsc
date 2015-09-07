@@ -1,14 +1,17 @@
-{-# LANGUAGE PatternGuards, ViewPatterns, Rank2Types, TupleSections, GADTs, DeriveFunctor, DeriveFoldable, ScopedTypeVariables, TypeSynonymInstances, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, RankNTypes, DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable, DeriveFunctor, DeriveTraversable, GADTs,
+             GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables,
+             TypeFamilies, TypeSynonymInstances #-}
+
 module Termination.Terminate where
 
 import Utilities
 
 import qualified Data.Foldable as Foldable
-import qualified Data.Traversable as Traversable
 import Data.Monoid
+import qualified Data.Traversable as Traversable
 
-import qualified Data.IntSet as IS
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Tree as T
@@ -59,7 +62,7 @@ instance Prearrow (->) where
 -- in at least one infinite ascending sequence of chain elements related pairwise by <|.
 data WQO a why = forall repr. WQO {
     prepareElement :: a -> repr,
-    embedElements :: repr -> repr -> Maybe why
+    embedElements  :: repr -> repr -> Maybe why
   }
 
 -- | Tests whether two elements are embedding according to the given embedding operator.
@@ -198,7 +201,7 @@ tree wqo = wqo_tree
   where
     wqo_tree :: WQO (T.Tree a) (T.Tree why)
     wqo_tree = precomp (\(T.Node x txs) -> (x, txs)) (postcomp (\(why, twhys) -> T.Node why twhys) wqo_treeish)
-    
+
     wqo_treeish :: WQO (a, [T.Tree a]) (why, [T.Tree why])
     wqo_treeish = prod wqo (list wqo_tree)
 
@@ -210,11 +213,11 @@ tree_equal = postcomp (const ()) $ tree equal
 
 class HasDomain f where
     type Domain f :: *
-    
+
     -- | Extract the domain of the object.
     --  > domain x == domain y ==> zipWith_ f x y == unsafeZipWith_ f x y obeys the properties of Zippable
     domain :: f a -> Domain f
-    
+
     -- | Conditionally safe zipping operation: safe if both sides of the zip have the same 'domain'
     unsafeZipWith_ :: (a -> b -> c) -> f a -> f b -> f c
 
