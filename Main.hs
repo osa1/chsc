@@ -130,12 +130,10 @@ trySC :: FilePath -- ^ Test file
       -> IO (Either String (GHCStats, Size, Maybe (Seconds, SCStats)))
 trySC file wrapper e test_e = do
     -- TODO: Need to implement instances, disabling this for now.
-    -- rnf e `seq` return ()
+    rnf e `seq` return ()
     let (stats, e') = supercompile e
     mb_super_t <- timeout (tIMEOUT_SECONDS * 1000000)
-                          (time_ (e' `seq` return ()))
-                          -- TODO: Enable this
-                          -- (time_ (rnf e' `seq` return ()))
+                          (time_ (rnf e' `seq` return ()))
     case mb_super_t of
       Nothing -> return $ Left "Supercompilation timeout"
       Just super_t -> do

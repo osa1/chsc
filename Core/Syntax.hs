@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveAnyClass, Rank2Types, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances, Rank2Types, TypeSynonymInstances #-}
 module Core.Syntax where
 
 import Name
@@ -8,25 +8,28 @@ import Utilities
 import Control.Monad.Identity
 import Data.Copointed
 import Data.List
-import GHC.Generics (Generic)
 
 import Core.Data (DataCon)
 
 type Var = Name
 
-data PrimOp = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | LessThanEqual
-            deriving (Eq, Ord, Show, Generic, NFData)
+data PrimOp
+  = Add | Subtract | Multiply | Divide | Modulo | Equal | LessThan | LessThanEqual
+  deriving (Eq, Ord, Show)
 
-data AltCon = DataAlt DataCon [Var] | LiteralAlt Literal | DefaultAlt (Maybe Var)
-            deriving (Eq, Show)
+instance NFData PrimOp where
+    rnf p = p `seq` ()
+
+data AltCon
+  = DataAlt DataCon [Var]
+  | LiteralAlt Literal
+  | DefaultAlt (Maybe Var)
+  deriving (Eq, Show)
 
 instance NFData AltCon where
-  rnf (DataAlt con vs) = rnf con `seq` rnf (rnfCons vs)
-    where
-      rnfCons [] = ()
-      rnfCons (_ : t) = rnfCons t
-  rnf (LiteralAlt lit) = () -- No NFData for Literal
-  rnf (DefaultAlt mv)  = mv `seq` () -- We use seq here, because GHC's Var is not NFData
+    rnf (DataAlt a b) = rnf a `seq` rnf b
+    rnf (LiteralAlt a) = rnf a
+    rnf (DefaultAlt a) = rnf a
 
 -- Note [Case wildcards]
 -- ~~~~~~~~~~~~~~~~~~~~~
@@ -69,6 +72,10 @@ data Literal
   = Int Integer | Char Char
   deriving (Eq, Show)
 
+instance NFData Literal where
+    rnf (Int i) = rnf i
+    rnf (Char c) = rnf c
+
 type Term = Identity (TermF Identity)
 
 type TaggedTerm = Tagged (TermF Tagged)
@@ -80,6 +87,14 @@ data TermF ann
   | PrimOp PrimOp [ann (TermF ann)]
   | Case (ann (TermF ann)) [AltF ann]
   | LetRec [(Var, ann (TermF ann))] (ann (TermF ann))
+
+instance NFData (TermF Identity) where
+    rnf (Var a) = rnf a
+    rnf (Value a) = rnf a
+    rnf (App a b) = rnf a `seq` rnf b
+    rnf (PrimOp a b) = rnf a `seq` rnf b
+    rnf (Case a b) = rnf a `seq` rnf b
+    rnf (LetRec a b) = rnf a `seq` rnf b
 
 type Alt = AltF Identity
 type TaggedAlt = AltF Tagged
@@ -93,6 +108,12 @@ data ValueF ann
   | Lambda Var (ann (TermF ann))
   | Data DataCon [Var]
   | Literal Literal -- TODO: add PAPs as well? Would avoid duplicating function bodies too eagerly.
+
+instance NFData (ValueF Identity) where
+    rnf (Indirect a) = rnf a
+    rnf (Lambda a b) = rnf a `seq` rnf b
+    rnf (Data a b) = rnf a `seq` rnf b
+    rnf (Literal a) = rnf a
 
 instance Pretty PrimOp where
     pPrint Add           = text "(+)"

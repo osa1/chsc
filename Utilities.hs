@@ -96,6 +96,9 @@ data Tag = TG { tagFin :: Fin, tagOccurrences :: Nat } deriving (Eq, Ord, Show)
 instance Pretty Tag where
     pPrint (TG i occs) = pPrint i <> brackets (pPrint occs)
 
+instance NFData Tag where
+    rnf (TG f os) = rnf f `seq` rnf os
+
 mkTag :: Int -> Tag
 mkTag i = TG (Fin i) 1
 
