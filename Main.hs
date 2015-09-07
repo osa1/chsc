@@ -113,7 +113,7 @@ tryGHC :: FilePath -- ^ Test file
        -> String   -- ^ Wrapper to add to the generated Haskell test file
        -> Term     -- ^ `root` definition
        -> Term     -- ^ `tests` definition
-       -> IO (Either String ((Bytes, Seconds, Bytes, Seconds), Size, Maybe a))
+       -> IO (Either String (GHCStats, Size, Maybe a))
 tryGHC file wrapper e test_e = do
     (before_code, before_res) <- runCompiled wrapper e test_e
 
@@ -127,7 +127,7 @@ trySC :: FilePath -- ^ Test file
       -> String   -- ^ Wrapper to add to the generated Haskell test file
       -> Term     -- ^ `root` definition
       -> Term     -- ^ `tests` definition
-      -> IO (Either String ((Bytes, Seconds, Bytes, Seconds), Size, Maybe (Seconds, SCStats)))
+      -> IO (Either String (GHCStats, Size, Maybe (Seconds, SCStats)))
 trySC file wrapper e test_e = do
     -- TODO: Need to implement instances, disabling this for now.
     -- rnf e `seq` return ()
@@ -153,7 +153,7 @@ trySC file wrapper e test_e = do
 showRaw
   :: String
      -- ^ Benchmark name
-  -> Maybe ((Bytes, Seconds, Bytes, Seconds), Int, Maybe (Seconds, SCStats))
+  -> Maybe (GHCStats, Int, Maybe (Seconds, SCStats))
      -- ^ Benchmark result
   -> String
 showRaw benchmark mb_res =
@@ -161,7 +161,7 @@ showRaw benchmark mb_res =
   where
     fields =
       case mb_res of
-        Just ((_size, compile_t, heap_size, run_t), term_size, mb_super_t) ->
+        Just (GHCStats _size compile_t heap_size run_t, term_size, mb_super_t) ->
           maybe ["", "", ""] (\(super_t, stats) -> [ show super_t
                                                    , show (stat_reduce_stops stats)
                                                    , show (stat_sc_stops stats)
@@ -173,11 +173,12 @@ showComparison benchmark mb_res = intercalate " & " (benchmark:fields) ++ " \\\\
   where
     fields =
       case mb_res of
-        Just (( (_before_size, before_compile_t, before_heap_size, before_run_t)
+        Just (( GHCStats _before_size before_compile_t before_heap_size before_run_t
               , before_term_size
               , Nothing ),
-              ( (_after_size,  after_compile_t,  after_heap_size,  after_run_t)
-              , after_term_size,  Just (after_super_t, after_stats) )
+              ( GHCStats _after_size  after_compile_t  after_heap_size  after_run_t
+              , after_term_size
+              , Just (after_super_t, after_stats) )
              ) -> [ dp1 after_super_t ++ "s"
                   , show (stat_reduce_stops after_stats)
                   , show (stat_sc_stops after_stats)
