@@ -13,10 +13,8 @@ import System.Exit
 import System.IO
 import System.Process
 
-
 gHC :: FilePath
-gHC = "/Users/mbolingbroke/Programming/Checkouts/ghc.head/inplace/bin/ghc-stage2"
-
+gHC = "ghc"
 
 termToHaskell :: Term -> String
 termToHaskell = show . pPrintPrec haskellLevel 0
