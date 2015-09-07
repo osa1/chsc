@@ -269,7 +269,9 @@ reduce orig_state = go (mkHistory (extra rEDUCE_WQO)) orig_state
         Nothing -> (mempty, state)
         Just state' -> case terminate hist (state, state) of
           Continue hist'         -> go hist' state'
-          Stop (_gen, old_state) -> trace "reduce-stop" $ (mempty { stat_reduce_stops = 1 }, if rEDUCE_ROLLBACK then old_state else state') -- TODO: generalise?
+          Stop (_gen, old_state) ->
+            -- trace "reduce-stop" $
+              (mempty { stat_reduce_stops = 1 }, if rEDUCE_ROLLBACK then old_state else state') -- TODO: generalise?
 
 
 --
@@ -499,15 +501,29 @@ sc' :: History (State, RollbackScpM) (Generaliser, RollbackScpM) -> AlreadySpecu
 sc  hist = rollbackBig (memo (sc' hist))
 sc' hist speculated state state' = (\raise -> check raise) `catchScpM` \gen -> stop gen hist -- TODO: I want to use the original history here, but I think doing so leads to non-term as it contains rollbacks from "below us" (try DigitsOfE2)
   where
-    check this_rb = case terminate hist (if rEDUCE_BEFORE_TEST && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
-                      Continue hist' -> continue hist'
-                      Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
-    stop gen hist = do addStats $ mempty { stat_sc_stops = 1 }
-                       trace "sc-stop" $ fromMaybe (trace "sc-stop: no generalisation" $ split state) (generalise gen state) (sc hist speculated) -- Keep the trace exactly here or it gets floated out by GHC
-    continue hist = do traceRenderScpM ("reduce end (continue)", pPrintFullState state')
-                       addStats stats
-                       split state' (sc hist speculated')
-      where (speculated', (stats, state')) = (if sPECULATION then speculate speculated else (speculated,)) $ reduce state -- TODO: experiment with doing admissability-generalisation on reduced terms. My suspicion is that it won't help, though (such terms are already stuck or non-stuck but loopy: throwing stuff away does not necessarily remove loopiness).
+    check this_rb =
+      case terminate hist (if rEDUCE_BEFORE_TEST && sPECULATION then state' else state {- FIXME: good idea? flag control? -}, this_rb) of
+        Continue hist' -> continue hist'
+        Stop (gen, rb) -> maybe (stop gen hist) ($ gen) $ guard sC_ROLLBACK >> Just rb
+
+    stop gen hist = do
+      addStats $ mempty { stat_sc_stops = 1 }
+      -- trace "sc-stop" $
+      fromMaybe ({- trace "sc-stop: no generalisation" $ -} split state)
+                (generalise gen state)
+                (sc hist speculated) -- Keep the trace exactly here or it gets floated out by GHC
+
+    continue hist = do
+      traceRenderScpM ("reduce end (continue)", pPrintFullState state')
+      addStats stats
+      split state' (sc hist speculated')
+      where
+        (speculated', (stats, state')) =
+          -- TODO: experiment with doing admissability-generalisation on reduced
+          -- terms. My suspicion is that it won't help, though (such terms are
+          -- already stuck or non-stuck but loopy: throwing stuff away does not
+          -- necessarily remove loopiness).
+          (if sPECULATION then speculate speculated else (speculated,)) $ reduce state
 
 memo :: (AlreadySpeculated -> State -> State -> ScpM (Deeds, Out FVedTerm))
      ->  AlreadySpeculated -> State -> ScpM (Deeds, Out FVedTerm)

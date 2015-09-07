@@ -106,7 +106,6 @@ typechecks wrapper term = do
 
 normalise :: String -> Term -> IO (Either String String)
 normalise wrapper term = do
-    let haskell = printingModule wrapper term
     (ec, out, err) <- withSystemTempFile "Main.hs" $ \file h -> do
         hPutStr h haskell
         hClose h
@@ -114,6 +113,8 @@ normalise wrapper term = do
     case ec of
       ExitSuccess   -> return (Right out)
       ExitFailure _ -> hPutStrLn stderr haskell >> return (Left err)
+  where
+    haskell = printingModule wrapper term
 
 ghcVersion :: IO [Int]
 ghcVersion = do
