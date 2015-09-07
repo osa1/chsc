@@ -5,16 +5,17 @@ import Evaluator.FreeVars
 --import Evaluator.Residualise
 import Evaluator.Syntax
 
+import Core.Prelude (falseDataCon, trueDataCon)
 import Core.Renaming
 import Core.Syntax
-import Core.Prelude (trueDataCon, falseDataCon)
 
 import Renaming
 import StaticFlags
 import Utilities
 
-import qualified Data.Set as S
+import Data.List (uncons)
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 
 -- | Non-expansive simplification we can do everywhere safely
@@ -70,7 +71,7 @@ step' normalising state =
         case heapBindingTerm hb of
           Just  (rn, anned_e) -> fmap (rn,) $ termToValue anned_e -- FIXME: it would be cooler if we could exploit cheap non-values in unfoldings as well..
           Nothing             -> Nothing
-    
+
     -- Deal with a variable at the top of the stack
     -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
     force deeds (Heap h ids) k tg x'
@@ -80,7 +81,7 @@ step' normalising state =
       = do { (deeds, (rn, v)) <- prepareValue deeds x' (rn, annee anned_v); return (deeds, Heap h ids, k, (rn, annedTerm (annedTag anned_v) (Value v))) }
       | otherwise = do
         hb <- M.lookup x' h
-        -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing. 
+        -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing.
         guard (howBound hb == InternallyBound)
         in_e <- heapBindingTerm hb
         return $ case k of
@@ -111,7 +112,7 @@ step' normalising state =
         dereference :: Heap -> In AnnedValue -> In AnnedValue
         dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', annee anned_v')
         dereference _ in_v = in_v
-    
+
         apply :: Deeds -> Heap -> Stack -> In AnnedValue -> Out Var -> Maybe UnnormalisedState
         apply deeds h k in_v@(_, v) x2'
           | normalising, not dUPLICATE_VALUES_EVALUATOR, Indirect _ <- v = Nothing -- If not duplicating values, we ensure normalisation by not executing applications to non-explicit-lambdas
