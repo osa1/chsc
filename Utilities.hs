@@ -621,4 +621,4 @@ f1 <.> f2 = fmap f1 . f2
 {-# INLINE (<.>) #-}
 
 instance Pretty1 Identity where
-  pPrintPrec1 level prec t = pPrintPrec1 level prec t
+  pPrintPrec1 level prec (Identity x) = pPrintPrec level prec x
