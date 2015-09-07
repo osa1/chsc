@@ -42,6 +42,7 @@ executable supercompile
       pretty-class,
       process           >= 1.0.1.2 && < 1.3,
       random            >= 1.0 && < 1.1,
+      temporary,
       time              >= 1.5 && < 1.6,
       transformers
 

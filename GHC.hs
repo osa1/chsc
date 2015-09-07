@@ -5,12 +5,11 @@ import Core.Syntax
 import StaticFlags
 import Utilities
 
-import Control.Exception
 import Data.List (isPrefixOf)
 
-import System.Directory
 import System.Exit
 import System.IO
+import System.IO.Temp
 import System.Process
 
 gHC :: FilePath
@@ -93,7 +92,7 @@ printingModule wrapper e = unlines $
 
 typechecks :: String -> Term -> IO Bool
 typechecks wrapper term = do
-    (ec, _out, err) <- withTempFile "Main.hs" $ \(file, h) -> do
+    (ec, _out, err) <- withSystemTempFile "Main.hs" $ \file h -> do
         hPutStr h haskell
         hClose h
         readProcessWithExitCode gHC ["-c", file, "-fforce-recomp"] ""
@@ -108,7 +107,7 @@ typechecks wrapper term = do
 normalise :: String -> Term -> IO (Either String String)
 normalise wrapper term = do
     let haskell = printingModule wrapper term
-    (ec, out, err) <- withTempFile "Main.hs" $ \(file, h) -> do
+    (ec, out, err) <- withSystemTempFile "Main.hs" $ \file h -> do
         hPutStr h haskell
         hClose h
         readProcessWithExitCode gHC ["--make", "-O2", file, "-ddump-simpl", "-fforce-recomp"] ""
@@ -130,11 +129,11 @@ data GHCStats = GHCStats
 
 runCompiled :: String -> Term -> Term -> IO (String, Either String GHCStats)
 runCompiled wrapper e test_e =
-  withTempFile "Main" $ \(exe_file, exe_h) -> do
+  withSystemTempFile "Main" $ \exe_file exe_h -> do
     hClose exe_h
     let haskell = testingModule wrapper e test_e
     (compile_t, (ec, compile_out, compile_err)) <-
-      withTempFile "Main.hs" $ \(hs_file, hs_h) -> do
+      withSystemTempFile "Main.hs" $ \hs_file hs_h -> do
         hPutStr hs_h haskell
         hClose hs_h
         ghc_ver <- ghcVersion
@@ -168,11 +167,3 @@ runCompiled wrapper e test_e =
               return ( haskell ++ unlines ["", "{-", run_err, "-}"]
                      , Right $ GHCStats compiled_size compile_t total_bytes_allocated (read t_str)
                      )
-
-withTempFile :: String -> ((FilePath, Handle) -> IO b) -> IO b
-withTempFile name action = do
-    tmpdir <- getTemporaryDirectory
-    bracket
-        (openTempFile tmpdir name)
-        (\(fp,h) -> hClose h >> removeFile fp)
-        action
