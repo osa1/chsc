@@ -5,6 +5,7 @@ module Termination.Terminate where
 
 import Utilities
 
+import Data.Bifunctor
 import Data.Foldable
 import Data.Monoid
 
@@ -134,7 +135,7 @@ nat = WQO id $ \x y -> guard (x <= y) >> return (x < y)
 {-# INLINE coprod #-}
 coprod :: WQO a whya -> WQO b whyb -> WQO (Either a b) (Either whya whyb)
 coprod (lazy -> WQO prepare_a embed_a) (lazy -> WQO prepare_b embed_b) =
-    WQO (either (Left . prepare_a) (Right . prepare_b)) go
+    WQO (bimap prepare_a prepare_b) go
   where
     go (Left a1)  (Left a2)  = fmap Left  (a1 `embed_a` a2)
     go (Right b1) (Right b2) = fmap Right (b1 `embed_b` b2)
