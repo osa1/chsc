@@ -43,8 +43,10 @@ safeRename :: String -> Renaming -> Name -> Name
 safeRename = safeRename' . Just
 
 safeRename' :: Maybe String -> Renaming -> Name -> Name
-safeRename' mb_stk rn n | Just n' <- rename_maybe rn n = n'
-                        | otherwise                    = error $ show (text "Name" <+> pPrint n <+> text "out of scope" <+> maybe empty (\stk -> text "in" <+> text stk) mb_stk <> text "! Renaming:" $$ pPrint rn)
+safeRename' mb_stk rn n
+  | Just n' <- rename_maybe rn n = n'
+  | otherwise                    =
+    error $ show (text "Name" <+> pPrint n <+> text "out of scope" <+> maybe empty (\stk -> text "in" <+> text stk) mb_stk <> text "! Renaming:" $$ pPrint rn)
 
 rename_maybe :: Renaming -> Name -> Maybe Name
 rename_maybe rn n = M.lookup n (unRenaming rn)

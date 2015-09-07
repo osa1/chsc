@@ -20,34 +20,54 @@ import qualified Data.Set as S
 
 -- | Non-expansive simplification we can do everywhere safely
 --
--- Normalisation only ever releases deeds: it is *never* a net consumer of deeds. So normalisation
--- will never be impeded by a lack of deeds.
+-- Normalisation only ever releases deeds: it is *never* a net consumer of
+-- deeds. So normalisation will never be impeded by a lack of deeds.
 normalise :: UnnormalisedState -> State
 normalise = snd . step' True
 
--- | Possibly non-normalising simplification we can only do if we are allowed to by a termination test
+-- | Possibly non-normalising simplification we can only do if we are allowed to
+-- by a termination test.
 --
--- Unlike normalisation, stepping may be a net consumer of deeds and thus be impeded by a lack of them.
+-- Unlike normalisation, stepping may be a net consumer of deeds and thus be
+-- impeded by a lack of them.
 step :: State -> Maybe State
 step ((step' False . denormalise) -> (reduced, result)) = guard reduced >> return result
 
-step' :: Bool -> UnnormalisedState -> (Bool, State) -- The flag indicates whether we managed to reduce any steps *at all*
+-- The flag indicates whether we managed to reduce any steps *at all*.
+step' :: Bool -> UnnormalisedState -> (Bool, State)
 step' normalising state =
-    (\res@(_reduced, state') -> assertRender (hang (text "step': deeds lost or gained:") 2 (pPrint state $$ pPrint state'))
-                                             (noChange (releaseStateDeed state) (releaseStateDeed state')) $
-                                assertRender (text "step': FVs" $$ pPrint (stateFreeVars state) $$ pPrint state $$ pPrint (stateFreeVars state') $$ pPrint state') (stateFreeVars state' `S.isSubsetOf` stateFreeVars state) $
-                                -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
-                                res) $
-    go state
+    asserts (go state)
   where
-    go (deeds, h, k, (rn, e)) = case annee e of
-        Var x             -> maybe (False, (deeds, h, k, (rn, fmap (const (Question x)) e))) (\s -> (True, normalise s)) $ force  deeds h k tg (rename rn x);
-        Value v           -> maybe (False, (deeds, h, k, (rn, fmap (const (Answer v)) e)))   (\s -> (True, normalise s)) $ unwind deeds h k tg (rn, v)
-        App e1 x2         -> go (deeds, h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1))
-        PrimOp pop []     -> panic "reduced" (text "Nullary primop" <+> pPrint pop <+> text "in input")
-        PrimOp pop (e:es) -> go (deeds, h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e))
-        Case e alts       -> go (deeds, h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e))
-        LetRec xes e      -> go (allocate (deeds + 1) h k (rn, (xes, e)))
+    asserts :: (Bool, State) -> (Bool, State)
+    asserts res@(_reduced, state') =
+      assertRender (hang (text "step': deeds lost or gained:") 2 (pPrint state $$ pPrint state'))
+                   (noChange (releaseStateDeed state) (releaseStateDeed state')) $
+      assertRender (text "step': FVs" $$ pPrint (stateFreeVars state) $$ pPrint state $$ pPrint (stateFreeVars state') $$ pPrint state')
+                   (stateFreeVars state' `S.isSubsetOf` stateFreeVars state) $
+      -- traceRender (text "normalising" $$ nest 2 (pPrintFullUnnormalisedState state) $$ text "to" $$ nest 2 (pPrintFullState state')) $
+      res
+
+    go :: UnnormalisedState -> (Bool, State)
+    go (deeds, h, k, (rn, e)) =
+      case annee e of
+        Var x             ->
+          maybe (False, (deeds, h, k, (rn, fmap (const (Question x)) e)))
+                (\s -> (True, normalise s))
+                (force deeds h k tg (rename rn x))
+        Value v           ->
+          maybe (False, (deeds, h, k, (rn, fmap (const (Answer v)) e)))
+                (\s -> (True, normalise s))
+                (unwind deeds h k tg (rn, v))
+        App e1 x2         ->
+          go (deeds, h, Tagged tg (Apply (rename rn x2))            : k, (rn, e1))
+        PrimOp pop []     ->
+          panic "reduced" (text "Nullary primop" <+> pPrint pop <+> text "in input")
+        PrimOp pop (e:es) ->
+          go (deeds, h, Tagged tg (PrimApply pop [] (map (rn,) es)) : k, (rn, e))
+        Case e alts       ->
+          go (deeds, h, Tagged tg (Scrutinise (rn, alts))           : k, (rn, e))
+        LetRec xes e      ->
+          go (allocate (deeds + 1) h k (rn, (xes, e)))
       where tg = annedTag e
 
     allocate :: Deeds -> Heap -> Stack -> In ([(Var, AnnedTerm)], AnnedTerm) -> UnnormalisedState
@@ -72,13 +92,17 @@ step' normalising state =
           Just  (rn, anned_e) -> fmap (rn,) $ termToValue anned_e -- FIXME: it would be cooler if we could exploit cheap non-values in unfoldings as well..
           Nothing             -> Nothing
 
-    -- Deal with a variable at the top of the stack
-    -- Might have to claim deeds if inlining a non-value non-internally-bound thing here
+    -- | Deal with a variable at the top of the stack. Might have to claim deeds
+    -- if inlining a non-value non-internally-bound thing here.
+    force :: Deeds -> Heap -> Stack -> Tag -> Out Var -> Maybe UnnormalisedState
     force deeds (Heap h ids) k tg x'
-      -- NB: inlining values is non-normalising if dUPLICATE_VALUES_EVALUATOR is on (since doing things the long way would involve executing an update frame)
+      -- NB: inlining values is non-normalising if dUPLICATE_VALUES_EVALUATOR is
+      -- on (since doing things the long way would involve executing an update
+      -- frame)
       | not (dUPLICATE_VALUES_EVALUATOR && normalising)
       , Just (rn, anned_v) <- lookupValue (Heap h ids) x' -- NB: don't unwind *immediately* because we want that changing a Var into a Value in an empty stack is seen as a reduction 'step'
-      = do { (deeds, (rn, v)) <- prepareValue deeds x' (rn, annee anned_v); return (deeds, Heap h ids, k, (rn, annedTerm (annedTag anned_v) (Value v))) }
+      = do (deeds, (rn, v)) <- prepareValue deeds x' (rn, annee anned_v)
+           return (deeds, Heap h ids, k, (rn, annedTerm (annedTag anned_v) (Value v)))
       | otherwise = do
         hb <- M.lookup x' h
         -- NB: we MUST NOT create update frames for non-concrete bindings!! This has bitten me in the past, and it is seriously confusing.
@@ -89,7 +113,7 @@ step' normalising state =
             kf : _ | Update y' <- tagee kf -> (deeds, Heap (M.insert x' (internallyBound (mkIdentityRenaming [y'], annedTerm (tag kf) (Var y'))) h) ids,                         k, in_e)
             _                              -> (deeds, Heap (M.delete x' h)                                                                          ids, Tagged tg (Update x') : k, in_e)
 
-    -- Deal with a value at the top of the stack
+    -- | Deal with a value at the top of the stack.
     unwind :: Deeds -> Heap -> Stack -> Tag -> In AnnedValue -> Maybe UnnormalisedState
     unwind deeds h k tg_v in_v = uncons k >>= \(kf, k) -> case tagee kf of
         Apply x2'                 -> apply      (deeds + 1)          h k      in_v x2'
@@ -99,16 +123,28 @@ step' normalising state =
           | normalising, dUPLICATE_VALUES_EVALUATOR -> Nothing -- If duplicating values, we ensure normalisation by not executing updates
           | otherwise                               -> update deeds h k tg_v x' in_v
       where
-        -- When derereferencing an indirection, it is important that the resulting value is not stored anywhere. The reasons are:
-        --  1) That would cause allocation to be duplicated if we residualised immediately afterwards, because the value would still be in the heap
-        --  2) It would cause a violation of the deeds invariant because *syntax* would be duplicate
-        --  3) It feels a bit weird because it might turn phantom stuff into real stuff
+        -- When derereferencing an indirection, it is important that the
+        -- resulting value is not stored anywhere. The reasons are:
         --
-        -- Indirections do not change the deeds story much (at all). You have to pay a deed per indirection, which is released
-        -- whenever the indirection dies in the process of evaluation (e.g. in the function position of an application). The deeds
-        -- that the indirection "points to" are not affected by any of this. The exception is if we *retain* any subcomponent
-        -- of the dereferenced thing - in this case we have to be sure to claim some deeds for that subcomponent. For example, if we
-        -- dereference to get a lambda in our function application we had better claim deeds for the body.
+        --  1) That would cause allocation to be duplicated if we residualised
+        --     immediately afterwards, because the value would still be in the
+        --     heap.
+        --
+        --  2) It would cause a violation of the deeds invariant because
+        --     *syntax* would be duplicate.
+        --
+        --  3) It feels a bit weird because it might turn phantom stuff into
+        --     real stuff.
+        --
+        -- Indirections do not change the deeds story much (at all). You have to
+        -- pay a deed per indirection, which is released whenever the
+        -- indirection dies in the process of evaluation (e.g. in the function
+        -- position of an application). The deeds that the indirection "points
+        -- to" are not affected by any of this. The exception is if we *retain*
+        -- any subcomponent of the dereferenced thing - in this case we have to
+        -- be sure to claim some deeds for that subcomponent. For example, if we
+        -- dereference to get a lambda in our function application we had better
+        -- claim deeds for the body.
         dereference :: Heap -> In AnnedValue -> In AnnedValue
         dereference h (rn, Indirect x) | Just (rn', anned_v') <- lookupValue h (safeRename "dereference" rn x) = dereference h (rn', annee anned_v')
         dereference _ in_v = in_v

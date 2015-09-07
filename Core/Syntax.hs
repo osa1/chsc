@@ -191,7 +191,10 @@ altConBinders (LiteralAlt _)    = []
 altConBinders (DefaultAlt mb_x) = maybeToList mb_x
 
 termToValue :: (Copointed ann, Functor ann) => ann (TermF ann) -> Maybe (ann (ValueF ann))
-termToValue e = case copoint e of Value v -> Just (fmap (const v) e); _ -> Nothing
+termToValue e =
+    case copoint e of
+      Value v -> Just (fmap (const v) e)
+      _       -> Nothing
 
 termIsValue :: Copointed ann => ann (TermF ann) -> Bool
 termIsValue = isValue . copoint

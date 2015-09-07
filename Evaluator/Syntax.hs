@@ -87,7 +87,7 @@ qaToAnnedTerm' (Answer v)   = Value v
 
 
 type UnnormalisedState = (Deeds, Heap, Stack, In AnnedTerm)
-type State = (Deeds, Heap, Stack, In (Anned QA))
+type State             = (Deeds, Heap, Stack, In (Anned QA))
 
 denormalise :: State -> UnnormalisedState
 denormalise (deeds, h, k, (rn, qa)) = (deeds, h, k, (rn, fmap qaToAnnedTerm' qa))
@@ -96,10 +96,12 @@ denormalise (deeds, h, k, (rn, qa)) = (deeds, h, k, (rn, fmap qaToAnnedTerm' qa)
 -- Invariant: LetBound things cannot refer to LambdaBound things.
 --
 -- This is motivated by:
---  1. There is no point lambda-abstracting over things referred to by LetBounds because the resulting h-function would be
---     trapped under the appropriate let-binding anyway, at which point all the lambda-abstracted things would be in scope as FVs.
---  2. It allows (but does not require) the matcher to look into the RHS of LetBound stuff (rather than just doing nominal
---     matching).
+--  1. There is no point lambda-abstracting over things referred to by LetBounds
+--     because the resulting h-function would be trapped under the appropriate
+--     let-binding anyway, at which point all the lambda-abstracted things would
+--     be in scope as FVs.
+--  2. It allows (but does not require) the matcher to look into the RHS of
+--     LetBound stuff (rather than just doing nominal matching).
 data HowBound = InternallyBound | LambdaBound | LetBound
               deriving (Eq, Show)
 
