@@ -5,7 +5,6 @@ import Name
 import StaticFlags
 import Utilities
 
-import Control.DeepSeq (NFData)
 import Control.Monad.Identity
 import Data.Copointed
 import Data.List

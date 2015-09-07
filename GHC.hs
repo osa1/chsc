@@ -83,7 +83,7 @@ printingModule wrapper e = unlines $
     languageLine :
     "module Main(main, root) where" :
     "import Text.Show.Functions" :
-    [wrapper] ++
+    wrapper :
     "" :
     "main = print root" :
     "" :

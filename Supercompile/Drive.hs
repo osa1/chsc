@@ -35,7 +35,6 @@ import Control.Monad.Identity
 import qualified Data.Foldable as Foldable
 import Data.List (mapAccumL, partition, sortBy)
 import qualified Data.Map as M
-import Data.Monoid
 import Data.Ord
 import qualified Data.Set as S
 

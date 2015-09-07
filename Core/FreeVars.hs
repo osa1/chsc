@@ -13,7 +13,6 @@ import Data.Functor.Classes
 import Data.Functor.Compose
 import qualified Data.Set as S
 import qualified Data.Traversable as Traversable
-import GHC.Generics (Generic)
 
 type FreeVars = S.Set Var
 type BoundVars = S.Set Var

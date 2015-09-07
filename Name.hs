@@ -7,7 +7,6 @@ import Utilities
 
 import Data.Char
 import Data.List
-import Data.Ord
 
 data Name = Name {
     name_string :: String,
@@ -18,8 +17,9 @@ instance Show Name where
     show n = "(name " ++ show (show (pPrint n)) ++ ")"
 
 instance Eq Name where
-    -- I used to inject into Either String Id as an intermidate step but the resulting name_key function
-    -- accounted for like 88% of total allocation. Write it direct style for performance:
+    -- I used to inject into Either String Id as an intermidate step but the
+    -- resulting name_key function accounted for like 88% of total allocation.
+    -- Write it direct style for performance:
     n1 == n2 = case (name_id n1, name_id n2) of
         (Nothing, Nothing)   -> name_string n1 == name_string n2
         (Just id1, Just id2) -> id1 == id2

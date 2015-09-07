@@ -1,8 +1,8 @@
 module StaticFlags where
 
 import Data.Char (toLower)
-import Data.Maybe
 import Data.List (intercalate, stripPrefix)
+import Data.Maybe
 
 import System.Environment
 import System.IO.Unsafe
@@ -60,6 +60,7 @@ dEEDS_POLICY = parseEnum "--deeds-policy" Proportional [("fcfs", FCFS), ("propor
 
 data TagBagType = TBT { tagBagPairwiseGrowth :: Bool }
                 deriving (Show)
+
 data TagCollectionType = TagBag TagBagType | TagGraph | TagSet
                    deriving (Show)
 
@@ -96,7 +97,7 @@ bLOAT_FACTOR = fromMaybe 10 $ listToMaybe [read val | arg <- aRGS, Just val <- [
  --
  -- Total = 5 copies (due to tiebacks, the residual program will do better than this)
  --
- -- 
+ --
  -- Unfortunately, my implementation doesn't tie back as eagerly as you might like, so we actually peel the loop once and
  -- hence need a bloat factor of 8 here (5 + 3 other case statements derived from (++))
  -- TODO: figure out how to reduce this number.
